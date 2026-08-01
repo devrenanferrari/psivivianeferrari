@@ -102,24 +102,48 @@
 
     <!-- AGENDAR -->
     <section class="panel is-active" id="panel-agendar">
-      <div class="p-card">
-        <h2>Escolha um dia</h2>
+      <div class="p-card" id="bookingCard">
+        <ol class="bsteps" aria-hidden="true">
+          <li class="bstep is-active" id="bstep1"><i>1</i>Dia</li>
+          <li class="bstep" id="bstep2"><i>2</i>Horário</li>
+          <li class="bstep" id="bstep3"><i>3</i>Confirmação</li>
+        </ol>
+
+        <h2>Escolha o melhor dia para você</h2>
         <div class="day-scroll" id="dayScroll"></div>
-      </div>
-      <div class="p-card" id="slotCard" hidden>
-        <h2>Horários livres em <span id="slotDateLabel"></span></h2>
-        <div class="chip-row" id="slotRow"></div>
-      </div>
-      <div class="p-card" id="confirmCard" hidden>
-        <h2>Confirmar agendamento</h2>
-        <p class="muted" id="confirmLabel"></p>
-        <div style="display:flex; gap:0.7rem; margin-top:1rem; flex-wrap:wrap">
-          <button class="btn btn-primary" id="bookBtn">Solicitar este horário</button>
-          <button class="btn btn-ghost" id="bookCancelBtn">Voltar</button>
+
+        <div id="slotArea" hidden>
+          <h2 style="margin-top:1.6rem">Horários de <span id="slotDateLabel"></span></h2>
+          <div id="slotGroups"></div>
         </div>
-        <p class="hint">A Viviane confirma a sessão em até 24h úteis — você acompanha o status aqui e pode falar com ela pelas mensagens ou pelo <a id="waFallback" href="#" target="_blank" rel="noopener">WhatsApp</a>.</p>
+
+        <p class="hint" style="margin-top:1.4rem">Sessões online de 50 minutos, por videochamada. A Viviane confirma em até 24h úteis — e você pode falar com ela pelas <button type="button" class="text-btn" id="goMessages">mensagens</button> ou pelo <a id="waFallback" href="#" target="_blank" rel="noopener">WhatsApp</a>.</p>
+      </div>
+
+      <!-- sucesso -->
+      <div class="p-card booking-success" id="successCard" hidden>
+        <span class="success-check" aria-hidden="true">
+          <svg viewBox="0 0 52 52" width="52" height="52"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" d="M15 27l7 7 15-16"/></svg>
+        </span>
+        <h2>Pedido enviado!</h2>
+        <p class="muted" id="successLabel"></p>
+        <p class="muted">Assim que a Viviane confirmar, o status muda aqui — fique de olho em <strong>Minhas sessões</strong>.</p>
+        <div class="success-actions">
+          <button class="btn btn-primary" id="icsBtn">Adicionar ao calendário</button>
+          <button class="btn btn-ghost" id="seeSessionsBtn">Ver minhas sessões</button>
+          <button class="btn btn-ghost" id="bookAgainBtn">Agendar outro horário</button>
+        </div>
       </div>
     </section>
+
+    <!-- barra fixa de confirmação -->
+    <div class="book-bar" id="bookBar" hidden>
+      <div class="book-bar-info">
+        <strong id="bookBarLabel"></strong>
+        <span>Sessão online · 50 minutos</span>
+      </div>
+      <button class="btn btn-primary" id="bookBtn">Confirmar horário</button>
+    </div>
 
     <!-- MINHAS SESSÕES -->
     <section class="panel" id="panel-sessoes">
@@ -214,23 +238,54 @@
     });
 
     /* ── Agendamento ── */
+    let lastBooking = null;
+
+    function setBookStep(n) {
+      [1, 2, 3].forEach((i) => {
+        const el = $("bstep" + i);
+        el.classList.toggle("is-active", i === n);
+        el.classList.toggle("is-done", i < n);
+      });
+    }
+
+    function updateBookBar() {
+      const ready = Boolean(selectedDate && selectedSlot);
+      $("bookBar").hidden = !ready;
+      if (ready) {
+        $("bookBarLabel").textContent = `${VFStore.formatDate(selectedDate)} às ${selectedSlot}`;
+        setBookStep(3);
+      } else {
+        setBookStep(selectedDate ? 2 : 1);
+      }
+    }
+
     async function renderDays() {
       const wrap = $("dayScroll");
       wrap.innerHTML = "";
       const availability = await VFStore.availability();
       const today = new Date();
+      let lastMonth = null;
       for (let i = 1; i <= 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         if (!(availability[d.getDay()] || []).length) continue;
+        const monthLabel = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][d.getMonth()];
+        if (monthLabel !== lastMonth) {
+          const sep = document.createElement("span");
+          sep.className = "month-sep";
+          sep.textContent = monthLabel;
+          wrap.appendChild(sep);
+          lastMonth = monthLabel;
+        }
         const btn = document.createElement("button");
         btn.className = "chip is-day" + (dateStr === selectedDate ? " is-selected" : "");
-        btn.innerHTML = `<small>${VFStore.WEEKDAYS[d.getDay()]}</small><strong>${d.getDate()}/${d.getMonth() + 1}</strong>`;
+        const dayTag = i === 1 ? "amanhã" : VFStore.WEEKDAYS[d.getDay()];
+        btn.innerHTML = `<small>${dayTag}</small><strong>${d.getDate()}</strong>`;
         btn.addEventListener("click", async () => {
           selectedDate = dateStr;
           selectedSlot = null;
-          $("confirmCard").hidden = true;
+          updateBookBar();
           await renderDays();
           await renderSlots();
         });
@@ -238,51 +293,112 @@
       }
     }
 
+    const PERIODS = [
+      { nome: "Manhã", icone: "☀", test: (h) => h < "12:00" },
+      { nome: "Tarde", icone: "☁", test: (h) => h >= "12:00" && h < "18:00" },
+      { nome: "Noite", icone: "☾", test: (h) => h >= "18:00" },
+    ];
+
     async function renderSlots() {
-      const card = $("slotCard");
-      if (!selectedDate) { card.hidden = true; return; }
-      card.hidden = false;
+      const area = $("slotArea");
+      if (!selectedDate) { area.hidden = true; return; }
+      area.hidden = false;
       $("slotDateLabel").textContent = VFStore.formatDate(selectedDate);
-      const row = $("slotRow");
-      row.innerHTML = '<p class="muted">Carregando…</p>';
+      const wrap = $("slotGroups");
+      wrap.innerHTML = '<div class="chip-row">' + '<span class="chip chip-skeleton"></span>'.repeat(4) + "</div>";
       const slots = await VFStore.slotsFor(selectedDate);
-      row.innerHTML = "";
+      wrap.innerHTML = "";
       if (!slots.length) {
-        row.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum horário livre neste dia — tente outro.</p>';
+        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum horário livre neste dia — tente outro.</p>';
         return;
       }
-      slots.forEach((h) => {
-        const btn = document.createElement("button");
-        btn.className = "chip" + (h === selectedSlot ? " is-selected" : "");
-        btn.textContent = h;
-        btn.addEventListener("click", async () => {
-          selectedSlot = h;
-          await renderSlots();
-          $("confirmCard").hidden = false;
-          $("confirmLabel").textContent = `${VFStore.formatDate(selectedDate)} às ${h} · sessão online de 50 minutos`;
-          $("confirmCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      PERIODS.forEach(({ nome, icone, test }) => {
+        const group = slots.filter(test);
+        if (!group.length) return;
+        const section = document.createElement("div");
+        section.className = "slot-group";
+        section.innerHTML = `<p class="slot-group-title"><span>${icone}</span>${nome}</p>`;
+        const row = document.createElement("div");
+        row.className = "chip-row";
+        group.forEach((h) => {
+          const btn = document.createElement("button");
+          btn.className = "chip chip-slot" + (h === selectedSlot ? " is-selected" : "");
+          btn.textContent = h;
+          btn.addEventListener("click", () => {
+            selectedSlot = h;
+            wrap.querySelectorAll(".chip-slot").forEach((c) => c.classList.toggle("is-selected", c.textContent === h));
+            updateBookBar();
+          });
+          row.appendChild(btn);
         });
-        row.appendChild(btn);
+        section.appendChild(row);
+        wrap.appendChild(section);
       });
+      area.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
     $("bookBtn").addEventListener("click", async () => {
+      const btn = $("bookBtn");
+      btn.disabled = true;
+      btn.textContent = "Enviando…";
       try {
         await VFStore.book(selectedDate, selectedSlot);
-        toast("Pedido enviado! A Viviane confirma em até 24h úteis.");
+        lastBooking = { data: selectedDate, hora: selectedSlot };
+        $("successLabel").textContent = `${VFStore.formatDate(selectedDate)} às ${selectedSlot} · aguardando confirmação`;
+        $("bookingCard").hidden = true;
+        $("successCard").hidden = false;
+        $("bookBar").hidden = true;
         selectedDate = null; selectedSlot = null;
-        $("slotCard").hidden = true;
-        $("confirmCard").hidden = true;
         await refreshData();
-        await renderDays();
-        setPanel("sessoes");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (err) {
         toast(err.message);
         await renderSlots();
+        updateBookBar();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Confirmar horário";
       }
     });
 
-    $("bookCancelBtn").addEventListener("click", () => { $("confirmCard").hidden = true; });
+    function resetBooking() {
+      $("successCard").hidden = true;
+      $("bookingCard").hidden = false;
+      $("slotArea").hidden = true;
+      selectedDate = null; selectedSlot = null;
+      updateBookBar();
+      renderDays();
+    }
+
+    $("bookAgainBtn").addEventListener("click", resetBooking);
+    $("seeSessionsBtn").addEventListener("click", () => setPanel("sessoes"));
+    $("goMessages").addEventListener("click", () => setPanel("mensagens"));
+
+    /* .ics para o calendário */
+    $("icsBtn").addEventListener("click", () => {
+      if (!lastBooking) return;
+      const start = lastBooking.data.replace(/-/g, "") + "T" + lastBooking.hora.replace(":", "") + "00";
+      const endDate = new Date(`${lastBooking.data}T${lastBooking.hora}:00`);
+      endDate.setMinutes(endDate.getMinutes() + 50);
+      const pad = (n) => String(n).padStart(2, "0");
+      const end = `${endDate.getFullYear()}${pad(endDate.getMonth() + 1)}${pad(endDate.getDate())}T${pad(endDate.getHours())}${pad(endDate.getMinutes())}00`;
+      const ics = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//VF//Agendamento//PT",
+        "BEGIN:VEVENT",
+        "UID:" + Date.now() + "@psivivianeferrari",
+        "DTSTART:" + start,
+        "DTEND:" + end,
+        "SUMMARY:Sessão de terapia — Viviane Ferrari",
+        "DESCRIPTION:Sessão online de 50 minutos (sujeita à confirmação). O link da videochamada é combinado por mensagem.",
+        "END:VEVENT", "END:VCALENDAR",
+      ].join("\r\n");
+      const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sessao-viviane-ferrari.ics";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
     /* ── Sessões ── */
     function apptRow(a, cancellable) {

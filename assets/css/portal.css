@@ -311,6 +311,160 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 400; color: var(--wi
 .list-row { display: flex; align-items: center; gap: 0.9rem; padding: 0.85rem 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .list-row:last-child { border-bottom: none; }
 
+/* ── Fluxo de agendamento ───────────────────── */
+
+.bsteps {
+  display: flex;
+  gap: 1.4rem;
+  list-style: none;
+  margin-bottom: 1.6rem;
+  flex-wrap: wrap;
+}
+
+.bstep {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  opacity: 0.55;
+  transition: opacity 0.3s;
+}
+
+.bstep i {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  font-style: normal;
+  font-size: 0.78rem;
+  transition: all 0.3s;
+}
+
+.bstep.is-active { opacity: 1; color: var(--wine-deep); }
+.bstep.is-active i { background: var(--wine-deep); border-color: var(--wine-deep); color: var(--cream); }
+.bstep.is-done { opacity: 0.9; color: var(--ok); }
+.bstep.is-done i { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+
+.month-sep {
+  display: flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--caramel);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 0.3rem 0;
+}
+
+.chip-slot { min-width: 76px; text-align: center; font-variant-numeric: tabular-nums; }
+
+.slot-group { margin-bottom: 1.1rem; }
+
+.slot-group-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--caramel);
+  margin-bottom: 0.6rem;
+}
+
+.slot-group-title span { font-size: 0.95rem; }
+
+.chip-skeleton {
+  width: 76px;
+  height: 38px;
+  border-color: transparent;
+  background: linear-gradient(90deg, rgba(213, 188, 173, 0.25), rgba(213, 188, 173, 0.5), rgba(213, 188, 173, 0.25));
+  background-size: 200% 100%;
+  animation: skeleton 1.2s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes skeleton { to { background-position: -200% 0; } }
+
+.text-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--wine);
+  text-decoration: underline;
+}
+
+.book-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(660px, 94vw);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--wine-deep);
+  color: var(--cream);
+  border-radius: 999px;
+  padding: 0.75rem 0.8rem 0.75rem 1.6rem;
+  box-shadow: 0 18px 50px rgba(64, 18, 22, 0.45);
+  animation: bar-in 0.45s var(--ease);
+}
+
+@keyframes bar-in { from { opacity: 0; transform: translateX(-50%) translateY(24px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+.book-bar-info { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+.book-bar-info strong { font-weight: 500; font-size: 0.98rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.book-bar-info span { font-size: 0.75rem; color: var(--blush); }
+
+.book-bar .btn-primary { background: var(--cream); color: var(--wine-deep); box-shadow: none; flex-shrink: 0; }
+.book-bar .btn-primary:hover:not(:disabled) { background: #fff7eb; }
+
+.booking-success { text-align: center; padding: 2.6rem 1.8rem; }
+
+.success-check {
+  display: inline-block;
+  color: var(--ok);
+  margin-bottom: 1rem;
+}
+
+.success-check path {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: check-draw 0.6s 0.2s var(--ease) forwards;
+}
+
+@keyframes check-draw { to { stroke-dashoffset: 0; } }
+
+.booking-success h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.booking-success .muted { max-width: 42ch; margin-inline: auto; }
+.booking-success .muted + .muted { margin-top: 0.4rem; }
+
+.success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.7rem;
+  margin-top: 1.6rem;
+}
+
+@media (max-width: 640px) {
+  .book-bar { padding-left: 1.1rem; }
+  .book-bar .btn { padding: 0.75rem 1.2rem; font-size: 0.85rem; }
+}
+
 /* ── Toast ──────────────────────────────────── */
 
 .toast {
