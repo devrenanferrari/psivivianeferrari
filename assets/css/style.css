@@ -288,26 +288,34 @@ h1 em, h2 em {
   align-items: center;
 }
 
-.hero h1 { color: var(--cream); margin-bottom: 1.6rem; }
+.hero h1 {
+  color: var(--cream);
+  font-size: clamp(2.1rem, 4.6vw, 3.3rem);
+  margin-bottom: 1.2rem;
+}
 .hero h1 em { color: var(--blush); }
 
+.hero .eyebrow { font-size: 0.7rem; margin-bottom: 0.9rem; }
+
 .hero-sub {
-  font-size: 1.12rem;
-  max-width: 54ch;
-  opacity: 0.88;
-  margin-bottom: 2.4rem;
+  font-size: 1rem;
+  max-width: 46ch;
+  opacity: 0.85;
+  margin-bottom: 1.9rem;
 }
 
-.hero-cta { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 3rem; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 0.9rem; margin-bottom: 2.2rem; }
+
+.hero-cta .btn { padding: 0.85rem 1.8rem; font-size: 0.9rem; }
 
 .hero-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.6rem;
+  gap: 0.9rem 1.4rem;
   list-style: none;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   letter-spacing: 0.04em;
-  opacity: 0.8;
+  opacity: 0.75;
 }
 
 .hero-badges li { display: flex; align-items: center; gap: 0.55rem; }
