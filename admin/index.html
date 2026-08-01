@@ -60,25 +60,61 @@
     </div>
 
     <nav class="nav-tabs" aria-label="Seções">
-      <button class="nav-tab is-active" data-panel="agenda">Agenda <span class="pill" id="pendPill" hidden></span></button>
+      <button class="nav-tab is-active" data-panel="visao">Visão geral</button>
+      <button class="nav-tab" data-panel="agenda">Agenda <span class="pill" id="pendPill" hidden></span></button>
       <button class="nav-tab" data-panel="mensagens">Mensagens <span class="pill" id="msgPill" hidden></span></button>
       <button class="nav-tab" data-panel="disponibilidade">Horários</button>
       <button class="nav-tab" data-panel="pacientes">Pacientes</button>
     </nav>
 
+    <!-- VISÃO GERAL -->
+    <section class="panel is-active" id="panel-visao">
+      <div class="stat-grid">
+        <button class="stat" id="statHoje">
+          <strong id="stHoje">0</strong>
+          <span>sessões hoje</span>
+        </button>
+        <button class="stat stat-attention" id="statPend">
+          <strong id="stPend">0</strong>
+          <span>aguardando confirmação</span>
+        </button>
+        <button class="stat" id="statSemana">
+          <strong id="stSemana">0</strong>
+          <span>confirmadas · 7 dias</span>
+        </button>
+        <button class="stat" id="statMsg">
+          <strong id="stMsg">0</strong>
+          <span>mensagens não lidas</span>
+        </button>
+      </div>
+
+      <div class="p-card" id="todayCard">
+        <h2>Agenda de hoje</h2>
+        <div id="todayList"></div>
+      </div>
+
+      <div class="p-card">
+        <div class="card-head-row">
+          <h2>Ocupação · próximos 7 dias</h2>
+          <span class="muted" id="occupancyLabel"></span>
+        </div>
+        <div class="week-chart" id="weekChart" role="img" aria-label="Sessões marcadas por dia nos próximos 7 dias"></div>
+      </div>
+    </section>
+
     <!-- AGENDA -->
-    <section class="panel is-active" id="panel-agenda">
+    <section class="panel" id="panel-agenda">
       <div class="p-card">
-        <h2>Solicitações pendentes</h2>
-        <div id="pendingList"></div>
-      </div>
-      <div class="p-card">
-        <h2>Próximas sessões confirmadas</h2>
-        <div id="confirmedList"></div>
-      </div>
-      <div class="p-card">
-        <h2>Histórico e canceladas</h2>
-        <div id="historyList"></div>
+        <div class="filters-row">
+          <div class="chip-row" id="agendaFilters">
+            <button class="chip is-selected" data-f="proximas">Próximas</button>
+            <button class="chip" data-f="pendente">Pendentes</button>
+            <button class="chip" data-f="confirmada">Confirmadas</button>
+            <button class="chip" data-f="historico">Histórico</button>
+          </div>
+          <input type="search" class="search-input" id="agendaSearch" placeholder="Buscar paciente…" />
+        </div>
+        <div id="agendaList"></div>
       </div>
     </section>
 
@@ -92,6 +128,11 @@
         <button class="btn btn-ghost btn-sm" id="backThreads" style="margin-bottom:1rem">← Conversas</button>
         <h2 id="chatWith"></h2>
         <div class="chat-box" id="chatBox"></div>
+        <div class="quick-replies" id="quickReplies">
+          <button class="chip" data-msg="Sessão confirmada ✓ Te espero!">Sessão confirmada ✓</button>
+          <button class="chip" data-msg="Recebi sua mensagem — te respondo em breve.">Respondo em breve</button>
+          <button class="chip" data-msg="Podemos remarcar? Me diga um dia e horário que fique bom para você.">Propor remarcação</button>
+        </div>
         <form class="chat-form" id="chatForm">
           <input type="text" id="chatInput" placeholder="Responder…" autocomplete="off" />
           <button type="submit" class="btn btn-primary">Enviar</button>
@@ -106,14 +147,20 @@
         <p class="muted" style="margin-bottom:1rem">Escolha o dia e toque nos horários para abrir ou fechar. Os pacientes só conseguem agendar nos horários abertos.</p>
         <div class="avail-days" id="availDays"></div>
         <div class="avail-hours" id="availHours"></div>
-        <button class="btn btn-primary" id="saveAvail">Salvar horários</button>
+        <div style="display:flex; gap:0.7rem; flex-wrap:wrap">
+          <button class="btn btn-primary" id="saveAvail">Salvar horários</button>
+          <button class="btn btn-ghost" id="copyWeekdays">Aplicar este dia de seg a sex</button>
+        </div>
       </div>
     </section>
 
     <!-- PACIENTES -->
     <section class="panel" id="panel-pacientes">
       <div class="p-card">
-        <h2>Pacientes cadastrados</h2>
+        <div class="filters-row">
+          <h2 style="margin-bottom:0">Pacientes</h2>
+          <input type="search" class="search-input" id="patientSearch" placeholder="Buscar por nome ou e-mail…" />
+        </div>
         <div id="patientList"></div>
       </div>
     </section>
@@ -132,10 +179,14 @@
     let allAppts = [];
     let allMsgs = [];
     let patients = [];
+    let availabilityMap = {};
     let availDraft = null;
     let availDay = 1;
     let openThread = null;
     let setupMode = false;
+    let agendaFilter = "proximas";
+    let agendaQuery = "";
+    let patientQuery = "";
 
     let toastTimer;
     function toast(text) {
@@ -145,6 +196,12 @@
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => el.classList.remove("is-visible"), 3200);
     }
+
+    const dateOffset = (n) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
 
     /* ── Autenticação ── */
     function applyAuthMode() {
@@ -185,38 +242,9 @@
       const d = telDigits(tel);
       return d ? `https://wa.me/${d.length <= 11 ? "55" + d : d}` : null;
     };
-    const threadFor = (patientId) => allMsgs.filter((m) => m.patientId === patientId);
-    const unreadFrom = (patientId) => threadFor(patientId).filter((m) => m.de === "paciente" && !m.lida).length;
-
-    function apptRow(a, actions) {
-      const p = a.patient || patientById(a.patientId);
-      const row = document.createElement("div");
-      row.className = "appt";
-      row.innerHTML = `
-        <div class="appt-when"><strong>${VFStore.formatDate(a.data)}</strong><span>${a.hora}</span></div>
-        <div class="appt-who"><strong>${p ? escapeHtml(p.nome) : "Paciente removido"}</strong><span>${p ? escapeHtml(p.tel + " · " + p.email) : ""}</span></div>
-        <span class="badge badge-${a.status}">${a.status}</span>`;
-      const wrap = document.createElement("div");
-      wrap.className = "appt-actions";
-      (actions || []).forEach(([label, cls, fn]) => {
-        const b = document.createElement("button");
-        b.className = `btn ${cls} btn-sm`;
-        b.textContent = label;
-        b.addEventListener("click", fn);
-        wrap.appendChild(b);
-      });
-      if (p && waLink(p.tel)) {
-        const wa = document.createElement("a");
-        wa.className = "btn btn-ghost btn-sm";
-        wa.textContent = "WhatsApp";
-        wa.href = waLink(p.tel);
-        wa.target = "_blank";
-        wa.rel = "noopener";
-        wrap.appendChild(wa);
-      }
-      row.appendChild(wrap);
-      return row;
-    }
+    const threadOf = (patientId) => allMsgs.filter((m) => m.patientId === patientId);
+    const unreadFrom = (patientId) => threadOf(patientId).filter((m) => m.de === "paciente" && !m.lida).length;
+    const totalUnread = () => allMsgs.filter((m) => m.de === "paciente" && !m.lida).length;
 
     async function changeStatus(id, status, msg) {
       try {
@@ -226,39 +254,153 @@
       } catch (err) { toast(err.message); }
     }
 
+    function actionButtons(a) {
+      const wrap = document.createElement("div");
+      wrap.className = "appt-actions";
+      const add = (label, cls, fn) => {
+        const b = document.createElement("button");
+        b.className = `btn ${cls} btn-sm`;
+        b.textContent = label;
+        b.addEventListener("click", fn);
+        wrap.appendChild(b);
+      };
+      if (a.status === "pendente" && a.data >= VFStore.todayStr()) {
+        add("Confirmar", "btn-primary", () => changeStatus(a.id, "confirmada", "Sessão confirmada."));
+        add("Recusar", "btn-danger", () => changeStatus(a.id, "cancelada", "Solicitação recusada."));
+      } else if (a.status === "confirmada" && a.data >= VFStore.todayStr()) {
+        add("Cancelar", "btn-danger", () => { if (confirm("Cancelar esta sessão?")) changeStatus(a.id, "cancelada", "Sessão cancelada."); });
+      }
+      const p = a.patient || patientById(a.patientId);
+      if (p && waLink(p.tel)) {
+        const wa = document.createElement("a");
+        wa.className = "btn btn-ghost btn-sm";
+        wa.textContent = "WhatsApp";
+        wa.href = waLink(p.tel);
+        wa.target = "_blank";
+        wa.rel = "noopener";
+        wrap.appendChild(wa);
+      }
+      return wrap;
+    }
+
+    function apptRow(a, { compact = false } = {}) {
+      const p = a.patient || patientById(a.patientId);
+      const row = document.createElement("div");
+      row.className = "appt";
+      row.innerHTML = `
+        <div class="appt-when">${compact ? `<strong>${a.hora}</strong>` : `<strong>${VFStore.formatDate(a.data)}</strong><span>${a.hora}</span>`}</div>
+        <div class="appt-who"><strong>${p ? escapeHtml(p.nome) : "Paciente removido"}</strong><span>${p ? escapeHtml(p.tel) : ""}</span></div>
+        <span class="badge badge-${a.status}">${a.status}</span>`;
+      row.appendChild(actionButtons(a));
+      return row;
+    }
+
+    /* ── Visão geral ── */
+    function renderOverview() {
+      const today = VFStore.todayStr();
+      const active = allAppts.filter((a) => a.status !== "cancelada");
+      const todayAppts = active.filter((a) => a.data === today).sort((x, y) => x.hora.localeCompare(y.hora));
+      const pending = allAppts.filter((a) => a.status === "pendente" && a.data >= today);
+      const week = allAppts.filter((a) => a.status === "confirmada" && a.data >= today && a.data <= dateOffset(6));
+
+      $("stHoje").textContent = todayAppts.length;
+      $("stPend").textContent = pending.length;
+      $("stSemana").textContent = week.length;
+      $("stMsg").textContent = totalUnread();
+      $("statPend").classList.toggle("stat-attention", pending.length > 0);
+
+      $("todaySummary").textContent = todayAppts.length
+        ? `Você tem ${todayAppts.length} sessão(ões) hoje${pending.length ? ` e ${pending.length} solicitação(ões) para responder` : ""}.`
+        : pending.length ? `Sem sessões hoje — ${pending.length} solicitação(ões) aguardando resposta.` : "Dia livre na agenda.";
+
+      const tl = $("todayList");
+      tl.innerHTML = "";
+      if (!todayAppts.length) {
+        tl.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhuma sessão hoje. Um bom dia para cuidar de você também.</p>';
+      }
+      todayAppts.forEach((a) => tl.appendChild(apptRow(a, { compact: true })));
+
+      // ocupação 7 dias: sessões ativas ÷ horários abertos
+      const chart = $("weekChart");
+      chart.innerHTML = "";
+      let totalOpen = 0, totalBooked = 0;
+      for (let i = 0; i < 7; i++) {
+        const dateStr = dateOffset(i);
+        const weekday = new Date(dateStr + "T12:00:00").getDay();
+        const open = (availabilityMap[weekday] || []).length;
+        const booked = active.filter((a) => a.data === dateStr).length;
+        totalOpen += open; totalBooked += booked;
+        const pct = open ? Math.min(100, Math.round((booked / open) * 100)) : 0;
+        const col = document.createElement("div");
+        col.className = "wday" + (i === 0 ? " is-today" : "") + (open === 0 ? " is-off" : "");
+        col.title = open ? `${VFStore.formatDate(dateStr)}: ${booked} de ${open} horários` : `${VFStore.formatDate(dateStr)}: sem atendimento`;
+        col.innerHTML = `
+          <span class="wval">${open ? booked : "–"}</span>
+          <span class="wtrack"><span class="wfill" style="height:${pct}%"></span></span>
+          <span class="wlab">${i === 0 ? "hoje" : VFStore.WEEKDAYS[weekday]}</span>`;
+        chart.appendChild(col);
+      }
+      $("occupancyLabel").textContent = totalOpen ? `${Math.round((totalBooked / totalOpen) * 100)}% da semana ocupada` : "";
+    }
+
+    $("statHoje").addEventListener("click", () => { agendaFilter = "proximas"; setPanel("agenda"); });
+    $("statPend").addEventListener("click", () => { agendaFilter = "pendente"; setPanel("agenda"); });
+    $("statSemana").addEventListener("click", () => { agendaFilter = "confirmada"; setPanel("agenda"); });
+    $("statMsg").addEventListener("click", () => setPanel("mensagens"));
+
     /* ── Agenda ── */
     function renderAgenda() {
       const today = VFStore.todayStr();
-      const all = [...allAppts].sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
-      const pending = all.filter((a) => a.status === "pendente" && a.data >= today);
-      const confirmed = all.filter((a) => a.status === "confirmada" && a.data >= today);
-      const history = all.filter((a) => a.data < today || a.status === "cancelada").slice(-15).reverse();
+      $("agendaFilters").querySelectorAll(".chip").forEach((c) => c.classList.toggle("is-selected", c.dataset.f === agendaFilter));
 
-      const pw = $("pendingList"); pw.innerHTML = "";
-      if (!pending.length) pw.innerHTML = '<p class="empty">Nenhuma solicitação aguardando.</p>';
-      pending.forEach((a) => pw.appendChild(apptRow(a, [
-        ["Confirmar", "btn-primary", () => changeStatus(a.id, "confirmada", "Sessão confirmada.")],
-        ["Recusar", "btn-danger", () => changeStatus(a.id, "cancelada", "Solicitação recusada.")],
-      ])));
+      let list = [...allAppts];
+      if (agendaFilter === "proximas") list = list.filter((a) => a.data >= today && a.status !== "cancelada");
+      if (agendaFilter === "pendente") list = list.filter((a) => a.status === "pendente" && a.data >= today);
+      if (agendaFilter === "confirmada") list = list.filter((a) => a.status === "confirmada" && a.data >= today);
+      if (agendaFilter === "historico") list = list.filter((a) => a.data < today || a.status === "cancelada");
 
-      const cw = $("confirmedList"); cw.innerHTML = "";
-      if (!confirmed.length) cw.innerHTML = '<p class="empty">Nenhuma sessão confirmada por vir.</p>';
-      confirmed.forEach((a) => cw.appendChild(apptRow(a, [
-        ["Cancelar", "btn-danger", () => { if (confirm("Cancelar esta sessão?")) changeStatus(a.id, "cancelada", "Sessão cancelada."); }],
-      ])));
+      if (agendaQuery) {
+        const q = agendaQuery.toLowerCase();
+        list = list.filter((a) => {
+          const p = a.patient || patientById(a.patientId);
+          return p && (p.nome.toLowerCase().includes(q) || p.email.toLowerCase().includes(q));
+        });
+      }
 
-      const hw = $("historyList"); hw.innerHTML = "";
-      if (!history.length) hw.innerHTML = '<p class="empty">Sem registros ainda.</p>';
-      history.forEach((a) => hw.appendChild(apptRow(a, [])));
+      list.sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
+      if (agendaFilter === "historico") list.reverse();
 
+      const wrap = $("agendaList");
+      wrap.innerHTML = "";
+      if (!list.length) {
+        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nada por aqui com esse filtro.</p>';
+      }
+      let lastDate = null;
+      list.slice(0, 60).forEach((a) => {
+        if (a.data !== lastDate) {
+          const head = document.createElement("p");
+          head.className = "date-head";
+          const rel = a.data === today ? " · hoje" : a.data === dateOffset(1) ? " · amanhã" : "";
+          head.textContent = VFStore.formatDate(a.data) + rel;
+          wrap.appendChild(head);
+          lastDate = a.data;
+        }
+        wrap.appendChild(apptRow(a, { compact: true }));
+      });
+
+      const pending = allAppts.filter((a) => a.status === "pendente" && a.data >= today);
       $("pendPill").hidden = pending.length === 0;
       $("pendPill").textContent = pending.length;
-
-      const todayCount = all.filter((a) => a.data === today && a.status !== "cancelada").length;
-      $("todaySummary").textContent = todayCount
-        ? `Você tem ${todayCount} sessão(ões) hoje.`
-        : "Nenhuma sessão para hoje.";
     }
+
+    $("agendaFilters").addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      agendaFilter = chip.dataset.f;
+      renderAgenda();
+    });
+
+    $("agendaSearch").addEventListener("input", (e) => { agendaQuery = e.target.value.trim(); renderAgenda(); });
 
     /* ── Mensagens ── */
     function renderThreads() {
@@ -268,12 +410,10 @@
       if (!ids.length) {
         wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhuma conversa ainda.</p>';
       }
-      let totalUnread = 0;
       ids
-        .map((id) => ({ id, last: threadFor(id).at(-1), unread: unreadFrom(id) }))
-        .sort((a, b) => b.last.em.localeCompare(a.last.em))
+        .map((id) => ({ id, last: threadOf(id).at(-1), unread: unreadFrom(id) }))
+        .sort((a, b) => (b.unread - a.unread) || b.last.em.localeCompare(a.last.em))
         .forEach(({ id, last, unread }) => {
-          totalUnread += unread;
           const p = patientById(id);
           const btn = document.createElement("button");
           btn.className = "thread-item";
@@ -284,8 +424,9 @@
           btn.addEventListener("click", () => { openThread = id; renderChat(); });
           wrap.appendChild(btn);
         });
-      $("msgPill").hidden = totalUnread === 0;
-      $("msgPill").textContent = totalUnread;
+      const n = totalUnread();
+      $("msgPill").hidden = n === 0;
+      $("msgPill").textContent = n;
     }
 
     function renderChat() {
@@ -297,7 +438,7 @@
       $("chatWith").textContent = p ? p.nome : "Conversa";
       const box = $("chatBox");
       box.innerHTML = "";
-      threadFor(openThread).forEach((m) => {
+      threadOf(openThread).forEach((m) => {
         const b = document.createElement("div");
         b.className = "bubble " + (m.de === "psicologa" ? "bubble-me" : "bubble-them");
         const t = new Date(m.em);
@@ -309,10 +450,19 @@
         allMsgs.forEach((m) => { if (m.patientId === openThread && m.de === "paciente") m.lida = true; });
         renderThreads();
         $("threadsCard").hidden = true;
+        renderOverview();
       });
     }
 
     $("backThreads").addEventListener("click", () => { openThread = null; renderChat(); });
+
+    $("quickReplies").addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      const input = $("chatInput");
+      input.value = chip.dataset.msg;
+      input.focus();
+    });
 
     $("chatForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -360,26 +510,56 @@
     $("saveAvail").addEventListener("click", async () => {
       try {
         await VFStore.setAvailability(availDraft);
+        availabilityMap = JSON.parse(JSON.stringify(availDraft));
+        renderOverview();
         toast("Horários salvos.");
       } catch (err) { toast(err.message); }
+    });
+
+    $("copyWeekdays").addEventListener("click", () => {
+      const base = availDraft[availDay] || [];
+      for (let d = 1; d <= 5; d++) {
+        if (base.length) availDraft[d] = [...base];
+        else delete availDraft[d];
+      }
+      renderAvail();
+      toast(`Horários de ${DAY_NAMES[availDay]} aplicados de segunda a sexta — salve para confirmar.`);
     });
 
     /* ── Pacientes ── */
     function renderPatients() {
       const wrap = $("patientList");
       wrap.innerHTML = "";
-      if (!patients.length) {
-        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum paciente cadastrado ainda.</p>';
+      let list = [...patients];
+      if (patientQuery) {
+        const q = patientQuery.toLowerCase();
+        list = list.filter((p) => p.nome.toLowerCase().includes(q) || p.email.toLowerCase().includes(q));
+      }
+      if (!list.length) {
+        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum paciente encontrado.</p>';
         return;
       }
-      patients.forEach((p) => {
-        const sessions = allAppts.filter((a) => a.patientId === p.id && a.status !== "cancelada").length;
+      const today = VFStore.todayStr();
+      list.forEach((p) => {
+        const mine = allAppts.filter((a) => a.patientId === p.id && a.status !== "cancelada");
+        const next = mine.filter((a) => a.data >= today).sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora))[0];
+        const unread = unreadFrom(p.id);
         const row = document.createElement("div");
         row.className = "list-row";
         row.innerHTML = `
           <span class="avatar">${p.nome[0].toUpperCase()}</span>
-          <div class="appt-who"><strong>${escapeHtml(p.nome)}</strong><span>${escapeHtml(p.email + " · " + p.tel)}</span></div>
-          <span class="muted">${sessions} sessão(ões)</span>`;
+          <div class="appt-who">
+            <strong>${escapeHtml(p.nome)}${unread ? ` <span class="pill" style="background:var(--caramel);color:#fff;border-radius:999px;padding:1px 7px;font-size:0.7rem">${unread}</span>` : ""}</strong>
+            <span>${escapeHtml(p.email + " · " + p.tel)}</span>
+            <span>${next ? "Próxima sessão: " + VFStore.formatDate(next.data) + " às " + next.hora : "Sem sessão marcada"} · ${mine.length} no total</span>
+          </div>`;
+        const actions = document.createElement("div");
+        actions.className = "appt-actions";
+        const msgBtn = document.createElement("button");
+        msgBtn.className = "btn btn-ghost btn-sm";
+        msgBtn.textContent = "Mensagem";
+        msgBtn.addEventListener("click", () => { openThread = p.id; setPanel("mensagens"); renderChat(); });
+        actions.appendChild(msgBtn);
         if (waLink(p.tel)) {
           const wa = document.createElement("a");
           wa.className = "btn btn-ghost btn-sm";
@@ -387,35 +567,42 @@
           wa.href = waLink(p.tel);
           wa.target = "_blank";
           wa.rel = "noopener";
-          row.appendChild(wa);
+          actions.appendChild(wa);
         }
+        row.appendChild(actions);
         wrap.appendChild(row);
       });
     }
 
+    $("patientSearch").addEventListener("input", (e) => { patientQuery = e.target.value.trim(); renderPatients(); });
+
     /* ── Navegação ── */
     function activePanel() {
       const tab = document.querySelector(".nav-tab.is-active");
-      return tab ? tab.dataset.panel : "agenda";
+      return tab ? tab.dataset.panel : "visao";
     }
     function setPanel(name) {
       document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.panel === name));
       document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("is-active", p.id === "panel-" + name));
-      if (name === "mensagens") { openThread = null; renderChat(); }
+      if (name === "visao") renderOverview();
+      if (name === "agenda") renderAgenda();
+      if (name === "mensagens" && !openThread) renderChat();
       if (name === "disponibilidade") renderAvail();
       if (name === "pacientes") renderPatients();
     }
     document.querySelectorAll(".nav-tab").forEach((t) =>
-      t.addEventListener("click", () => setPanel(t.dataset.panel))
+      t.addEventListener("click", () => { if (t.dataset.panel === "mensagens") openThread = null; setPanel(t.dataset.panel); })
     );
 
     /* ── Dados ── */
     async function refreshData() {
-      [allAppts, allMsgs, patients] = await Promise.all([
+      [allAppts, allMsgs, patients, availabilityMap] = await Promise.all([
         VFStore.allAppointments(),
         VFStore.allMessages(),
         VFStore.patientsList(),
+        VFStore.availability(),
       ]);
+      renderOverview();
       renderAgenda();
       if (activePanel() === "mensagens") { openThread ? renderChat() : renderThreads(); } else renderThreads();
       if (activePanel() === "pacientes") renderPatients();
