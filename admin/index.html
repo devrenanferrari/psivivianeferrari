@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel — VF</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%23401216'/><text x='50' y='64' font-size='38' text-anchor='middle' fill='%23FFEDDA' font-family='Georgia,serif' font-style='italic'>VF</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=Jost:ital,wght@0,300;0,400;0,500;0,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/portal.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="../" class="brand">
+        <span class="brand-mark">VF</span>
+        <span class="brand-text">
+          <strong>Viviane Ferrari</strong>
+          <small>Painel de Controle</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <button class="top-link" id="logoutBtn" hidden>Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════ LOGIN / PRIMEIRO ACESSO ══════════ -->
+  <main class="auth-wrap" id="authView">
+    <div class="auth-card">
+      <div class="auth-seal">VF</div>
+      <h1 id="authTitle">Painel de Controle</h1>
+      <p id="authSub">Acesso restrito.</p>
+      <p class="form-error" id="authError"></p>
+      <form id="authForm">
+        <div class="field">
+          <label for="authPass" id="authPassLabel">Senha</label>
+          <input type="password" id="authPass" autocomplete="current-password" required />
+        </div>
+        <div class="field" id="authPass2Field" hidden>
+          <label for="authPass2">Repita a senha</label>
+          <input type="password" id="authPass2" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="authSubmit">Entrar</button>
+      </form>
+      <p class="hint" id="authHint"></p>
+    </div>
+  </main>
+
+  <!-- ══════════ PAINEL ══════════ -->
+  <main class="app container" id="appView" hidden>
+    <div class="app-head">
+      <div>
+        <h1>Bom te ver, <em>Viviane</em></h1>
+        <p id="todaySummary"></p>
+      </div>
+    </div>
+
+    <nav class="nav-tabs" aria-label="Seções">
+      <button class="nav-tab is-active" data-panel="agenda">Agenda <span class="pill" id="pendPill" hidden></span></button>
+      <button class="nav-tab" data-panel="mensagens">Mensagens <span class="pill" id="msgPill" hidden></span></button>
+      <button class="nav-tab" data-panel="disponibilidade">Horários</button>
+      <button class="nav-tab" data-panel="pacientes">Pacientes</button>
+    </nav>
+
+    <!-- AGENDA -->
+    <section class="panel is-active" id="panel-agenda">
+      <div class="p-card">
+        <h2>Solicitações pendentes</h2>
+        <div id="pendingList"></div>
+      </div>
+      <div class="p-card">
+        <h2>Próximas sessões confirmadas</h2>
+        <div id="confirmedList"></div>
+      </div>
+      <div class="p-card">
+        <h2>Histórico e canceladas</h2>
+        <div id="historyList"></div>
+      </div>
+    </section>
+
+    <!-- MENSAGENS -->
+    <section class="panel" id="panel-mensagens">
+      <div class="p-card" id="threadsCard">
+        <h2>Conversas</h2>
+        <div id="threadList"></div>
+      </div>
+      <div class="p-card" id="chatCard" hidden>
+        <button class="btn btn-ghost btn-sm" id="backThreads" style="margin-bottom:1rem">← Conversas</button>
+        <h2 id="chatWith"></h2>
+        <div class="chat-box" id="chatBox"></div>
+        <form class="chat-form" id="chatForm">
+          <input type="text" id="chatInput" placeholder="Responder…" autocomplete="off" />
+          <button type="submit" class="btn btn-primary">Enviar</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- DISPONIBILIDADE -->
+    <section class="panel" id="panel-disponibilidade">
+      <div class="p-card">
+        <h2>Modelo semanal de horários</h2>
+        <p class="muted" style="margin-bottom:1rem">Escolha o dia e toque nos horários para abrir ou fechar. Os pacientes só conseguem agendar nos horários abertos.</p>
+        <div class="avail-days" id="availDays"></div>
+        <div class="avail-hours" id="availHours"></div>
+        <button class="btn btn-primary" id="saveAvail">Salvar horários</button>
+      </div>
+    </section>
+
+    <!-- PACIENTES -->
+    <section class="panel" id="panel-pacientes">
+      <div class="p-card">
+        <h2>Pacientes cadastrados</h2>
+        <div id="patientList"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="../assets/js/store.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const HOURS = ["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00"];
+    const DAY_NAMES = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+
+    let availDraft = null;
+    let availDay = 1;
+    let openThread = null;
+
+    let toastTimer;
+    function toast(text) {
+      const el = $("toast");
+      el.textContent = text;
+      el.classList.add("is-visible");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove("is-visible"), 3200);
+    }
+
+    /* ── Autenticação ── */
+    const isSetup = !VFStore.adminConfigured();
+    if (isSetup) {
+      $("authTitle").textContent = "Primeiro acesso";
+      $("authSub").textContent = "Crie a senha do seu painel.";
+      $("authPassLabel").textContent = "Nova senha (mín. 6 caracteres)";
+      $("authPass2Field").hidden = false;
+      $("authSubmit").textContent = "Criar senha e entrar";
+      $("authHint").textContent = "Guarde esta senha — ela será pedida em todos os acessos ao painel.";
+    }
+
+    $("authForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("authError");
+      err.classList.remove("is-visible");
+      try {
+        if (isSetup) {
+          if ($("authPass").value !== $("authPass2").value) throw new Error("As senhas não conferem.");
+          await VFStore.adminSetup($("authPass").value);
+        } else {
+          await VFStore.adminLogin($("authPass").value);
+        }
+        boot();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.add("is-visible");
+      }
+    });
+
+    $("logoutBtn").addEventListener("click", () => { VFStore.adminLogout(); location.reload(); });
+
+    /* ── Helpers ── */
+    const patientById = (id) => VFStore.patients().find((p) => p.id === id);
+    const telDigits = (tel) => (tel || "").replace(/\D/g, "");
+    const waLink = (tel) => {
+      const d = telDigits(tel);
+      return d ? `https://wa.me/${d.length <= 11 ? "55" + d : d}` : null;
+    };
+
+    function apptRow(a, actions) {
+      const p = patientById(a.patientId);
+      const row = document.createElement("div");
+      row.className = "appt";
+      row.innerHTML = `
+        <div class="appt-when"><strong>${VFStore.formatDate(a.data)}</strong><span>${a.hora}</span></div>
+        <div class="appt-who"><strong>${p ? p.nome : "Paciente removido"}</strong><span>${p ? p.tel + " · " + p.email : ""}</span></div>
+        <span class="badge badge-${a.status}">${a.status}</span>`;
+      const wrap = document.createElement("div");
+      wrap.className = "appt-actions";
+      (actions || []).forEach(([label, cls, fn]) => {
+        const b = document.createElement("button");
+        b.className = `btn ${cls} btn-sm`;
+        b.textContent = label;
+        b.addEventListener("click", fn);
+        wrap.appendChild(b);
+      });
+      if (p && waLink(p.tel)) {
+        const wa = document.createElement("a");
+        wa.className = "btn btn-ghost btn-sm";
+        wa.textContent = "WhatsApp";
+        wa.href = waLink(p.tel);
+        wa.target = "_blank";
+        wa.rel = "noopener";
+        wrap.appendChild(wa);
+      }
+      row.appendChild(wrap);
+      return row;
+    }
+
+    /* ── Agenda ── */
+    function renderAgenda() {
+      const today = VFStore.todayStr();
+      const all = VFStore.appointments().sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
+      const pending = all.filter((a) => a.status === "pendente" && a.data >= today);
+      const confirmed = all.filter((a) => a.status === "confirmada" && a.data >= today);
+      const history = all.filter((a) => a.data < today || a.status === "cancelada").slice(-15).reverse();
+
+      const pw = $("pendingList"); pw.innerHTML = "";
+      if (!pending.length) pw.innerHTML = '<p class="empty">Nenhuma solicitação aguardando.</p>';
+      pending.forEach((a) => pw.appendChild(apptRow(a, [
+        ["Confirmar", "btn-primary", () => { VFStore.setAppointmentStatus(a.id, "confirmada"); refresh(); toast("Sessão confirmada."); }],
+        ["Recusar", "btn-danger", () => { VFStore.setAppointmentStatus(a.id, "cancelada"); refresh(); toast("Solicitação recusada."); }],
+      ])));
+
+      const cw = $("confirmedList"); cw.innerHTML = "";
+      if (!confirmed.length) cw.innerHTML = '<p class="empty">Nenhuma sessão confirmada por vir.</p>';
+      confirmed.forEach((a) => cw.appendChild(apptRow(a, [
+        ["Cancelar", "btn-danger", () => { if (confirm("Cancelar esta sessão?")) { VFStore.setAppointmentStatus(a.id, "cancelada"); refresh(); toast("Sessão cancelada."); } }],
+      ])));
+
+      const hw = $("historyList"); hw.innerHTML = "";
+      if (!history.length) hw.innerHTML = '<p class="empty">Sem registros ainda.</p>';
+      history.forEach((a) => hw.appendChild(apptRow(a, [])));
+
+      $("pendPill").hidden = pending.length === 0;
+      $("pendPill").textContent = pending.length;
+
+      const todayCount = all.filter((a) => a.data === today && a.status !== "cancelada").length;
+      $("todaySummary").textContent = todayCount
+        ? `Você tem ${todayCount} sessão(ões) hoje.`
+        : "Nenhuma sessão para hoje.";
+    }
+
+    /* ── Mensagens ── */
+    function renderThreads() {
+      const wrap = $("threadList");
+      wrap.innerHTML = "";
+      const ids = [...new Set(VFStore.messages().map((m) => m.patientId))];
+      if (!ids.length) {
+        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhuma conversa ainda.</p>';
+      }
+      let totalUnread = 0;
+      ids
+        .map((id) => ({ id, last: VFStore.threadFor(id).at(-1), unread: VFStore.unreadCount(id, "psicologa") }))
+        .sort((a, b) => b.last.em.localeCompare(a.last.em))
+        .forEach(({ id, last, unread }) => {
+          totalUnread += unread;
+          const p = patientById(id);
+          const btn = document.createElement("button");
+          btn.className = "thread-item";
+          btn.innerHTML = `
+            <span class="avatar">${p ? p.nome[0].toUpperCase() : "?"}</span>
+            <span class="thread-info"><strong>${p ? p.nome : "Paciente"}</strong><span>${last.de === "psicologa" ? "Você: " : ""}${last.texto.replace(/</g, "&lt;")}</span></span>
+            ${unread ? `<span class="pill" style="background:var(--caramel);color:#fff;border-radius:999px;padding:2px 8px;font-size:0.72rem">${unread}</span>` : ""}`;
+          btn.addEventListener("click", () => { openThread = id; renderChat(); });
+          wrap.appendChild(btn);
+        });
+      $("msgPill").hidden = totalUnread === 0;
+      $("msgPill").textContent = totalUnread;
+    }
+
+    function renderChat() {
+      const show = Boolean(openThread);
+      $("chatCard").hidden = !show;
+      $("threadsCard").hidden = show;
+      if (!show) { renderThreads(); return; }
+      const p = patientById(openThread);
+      $("chatWith").textContent = p ? p.nome : "Conversa";
+      const box = $("chatBox");
+      box.innerHTML = "";
+      VFStore.threadFor(openThread).forEach((m) => {
+        const b = document.createElement("div");
+        b.className = "bubble " + (m.de === "psicologa" ? "bubble-me" : "bubble-them");
+        const t = new Date(m.em);
+        b.innerHTML = `${m.texto.replace(/</g, "&lt;")}<time>${t.getDate()}/${t.getMonth() + 1} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time>`;
+        box.appendChild(b);
+      });
+      box.scrollTop = box.scrollHeight;
+      VFStore.markThreadRead(openThread, "psicologa");
+      renderThreads();
+      $("threadsCard").hidden = true;
+    }
+
+    $("backThreads").addEventListener("click", () => { openThread = null; renderChat(); });
+
+    $("chatForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = $("chatInput");
+      if (!input.value.trim() || !openThread) return;
+      VFStore.sendMessage(openThread, "psicologa", input.value);
+      input.value = "";
+      renderChat();
+    });
+
+    /* ── Disponibilidade ── */
+    function renderAvail() {
+      if (!availDraft) availDraft = JSON.parse(JSON.stringify(VFStore.availability()));
+      const days = $("availDays");
+      days.innerHTML = "";
+      for (let d = 0; d < 7; d++) {
+        const btn = document.createElement("button");
+        const count = (availDraft[d] || []).length;
+        btn.className = "chip" + (d === availDay ? " is-selected" : "");
+        btn.textContent = DAY_NAMES[d] + (count ? ` · ${count}` : "");
+        btn.addEventListener("click", () => { availDay = d; renderAvail(); });
+        days.appendChild(btn);
+      }
+      const hours = $("availHours");
+      hours.innerHTML = "";
+      HOURS.forEach((h) => {
+        const open = (availDraft[availDay] || []).includes(h);
+        const btn = document.createElement("button");
+        btn.className = "chip" + (open ? " is-selected" : "");
+        btn.textContent = h;
+        btn.addEventListener("click", () => {
+          const list = new Set(availDraft[availDay] || []);
+          open ? list.delete(h) : list.add(h);
+          availDraft[availDay] = [...list].sort();
+          if (!availDraft[availDay].length) delete availDraft[availDay];
+          renderAvail();
+        });
+        hours.appendChild(btn);
+      });
+    }
+
+    $("saveAvail").addEventListener("click", () => {
+      VFStore.setAvailability(availDraft);
+      toast("Horários salvos.");
+    });
+
+    /* ── Pacientes ── */
+    function renderPatients() {
+      const wrap = $("patientList");
+      wrap.innerHTML = "";
+      const list = VFStore.patients();
+      if (!list.length) {
+        wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum paciente cadastrado ainda.</p>';
+        return;
+      }
+      list.forEach((p) => {
+        const sessions = VFStore.appointments().filter((a) => a.patientId === p.id && a.status !== "cancelada").length;
+        const row = document.createElement("div");
+        row.className = "list-row";
+        row.innerHTML = `
+          <span class="avatar">${p.nome[0].toUpperCase()}</span>
+          <div class="appt-who"><strong>${p.nome}</strong><span>${p.email} · ${p.tel}</span></div>
+          <span class="muted">${sessions} sessão(ões)</span>`;
+        if (waLink(p.tel)) {
+          const wa = document.createElement("a");
+          wa.className = "btn btn-ghost btn-sm";
+          wa.textContent = "WhatsApp";
+          wa.href = waLink(p.tel);
+          wa.target = "_blank";
+          wa.rel = "noopener";
+          row.appendChild(wa);
+        }
+        wrap.appendChild(row);
+      });
+    }
+
+    /* ── Navegação ── */
+    function setPanel(name) {
+      document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.panel === name));
+      document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("is-active", p.id === "panel-" + name));
+      if (name === "mensagens") { openThread = null; renderChat(); }
+      if (name === "disponibilidade") renderAvail();
+      if (name === "pacientes") renderPatients();
+    }
+    document.querySelectorAll(".nav-tab").forEach((t) =>
+      t.addEventListener("click", () => setPanel(t.dataset.panel))
+    );
+
+    function refresh() {
+      renderAgenda();
+      renderThreads();
+    }
+
+    function boot() {
+      const logged = VFStore.adminLogged();
+      $("authView").hidden = logged;
+      $("appView").hidden = !logged;
+      $("logoutBtn").hidden = !logged;
+      if (!logged) return;
+      refresh();
+    }
+
+    // Atualiza em tempo real se a área do paciente estiver aberta em outra aba
+    window.addEventListener("storage", () => {
+      if (!VFStore.adminLogged()) return;
+      renderAgenda();
+      if (openThread) renderChat(); else renderThreads();
+    });
+
+    boot();
+  </script>
+</body>
+</html>
