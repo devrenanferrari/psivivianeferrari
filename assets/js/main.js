@@ -61,7 +61,7 @@ const summaryBox = document.getElementById("summary");
 const summaryList = document.getElementById("summaryList");
 const whatsappLink = document.getElementById("whatsappLink");
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 3;
 let current = 1;
 
 const getChoice = (name) => {
@@ -71,17 +71,16 @@ const getChoice = (name) => {
 
 const stepIsValid = () => {
   switch (current) {
-    case 1: return Boolean(getChoice("modalidade"));
-    case 2: return Boolean(getChoice("motivo"));
-    case 3: return Boolean(getChoice("periodo"));
-    case 4: return nomeInput.value.trim().length >= 2;
+    case 1: return Boolean(getChoice("motivo"));
+    case 2: return Boolean(getChoice("periodo"));
+    case 3: return nomeInput.value.trim().length >= 2;
     default: return true;
   }
 };
 
 const renderSummary = () => {
   const items = [
-    ["Modalidade", getChoice("modalidade")],
+    ["Modalidade", "Online (videochamada)"],
     ["Motivo", getChoice("motivo")],
     ["Período", getChoice("periodo")],
   ].filter(([, value]) => value);
@@ -106,7 +105,7 @@ const render = () => {
   nextBtn.disabled = !stepIsValid();
   nextBtn.textContent = current === TOTAL_STEPS ? "Concluir" : "Continuar";
 
-  if (current === 4) renderSummary();
+  if (current === 3) renderSummary();
 };
 
 const buildWhatsAppUrl = () => {
@@ -114,8 +113,7 @@ const buildWhatsAppUrl = () => {
   const message = [
     `Olá, Viviane! Me chamo ${nome} e vim pelo site.`,
     "",
-    "Gostaria de agendar uma primeira conversa:",
-    `• Modalidade: ${getChoice("modalidade")}`,
+    "Gostaria de agendar uma primeira conversa (online):",
     `• Motivo: ${getChoice("motivo")}`,
     `• Melhor período: ${getChoice("periodo")}`,
     "",

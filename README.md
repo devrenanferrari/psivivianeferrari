@@ -24,7 +24,7 @@ assets/js/main.js     Interações (menu, reveal, wizard de agendamento)
 
 ## Fluxo de agendamento
 
-O wizard em `#agendar` guia a pessoa em 4 etapas (modalidade → motivo → período → nome) e gera uma mensagem pronta para o WhatsApp com o resumo do pedido — sem backend, sem cadastro, sem fricção.
+O atendimento é 100% online. O wizard em `#agendar` guia a pessoa em 3 etapas (motivo → período → nome) e gera uma mensagem pronta para o WhatsApp com o resumo do pedido — sem backend, sem cadastro, sem fricção.
 
 ## Antes de publicar
 
