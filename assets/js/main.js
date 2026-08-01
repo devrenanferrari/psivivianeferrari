@@ -6,9 +6,8 @@
 // garantindo que o conteúdo nunca fique invisível sem JavaScript.
 document.documentElement.classList.add("js");
 
-// Número do WhatsApp do consultório (formato internacional, só dígitos).
-// Troque pelo número real: ex. "5511999999999"
-const WHATSAPP_NUMBER = "5500000000000";
+// Número do WhatsApp (formato internacional, só dígitos).
+const WHATSAPP_NUMBER = "5532984146528";
 
 /* ── Header: fundo sólido ao rolar ─────────── */
 const header = document.querySelector(".site-header");

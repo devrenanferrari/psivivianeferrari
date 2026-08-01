@@ -28,11 +28,11 @@ O atendimento é 100% online. O wizard em `#agendar` guia a pessoa em 3 etapas (
 
 ## Antes de publicar
 
-1. **WhatsApp**: troque `WHATSAPP_NUMBER` em `assets/js/main.js` e os links `wa.me/5500000000000` no `index.html` pelo número real.
-2. **CRP**: substitua `CRP 00/00000` pelo registro real (header, sobre e rodapé).
-3. **Foto**: substitua o placeholder `.portrait-placeholder` por uma foto profissional.
-4. **E-mail e Instagram**: atualize os links no rodapé.
-5. **Textos**: revise formação, especialidades e valores na conversa inicial.
+1. **CRP**: substitua `CRP 00/00000` pelo registro real (header, sobre e rodapé).
+2. **E-mail**: confirme o endereço no rodapé (`contato@psivivianeferrari.com.br`).
+3. **Textos**: revise formação, especialidades e valores na conversa inicial.
+
+WhatsApp (`5532984146528`) e Instagram (`@psivivianeferrari`) já estão configurados no wizard, no rodapé e nos botões flutuantes.
 
 ## Notas de conformidade (CFP)
 
