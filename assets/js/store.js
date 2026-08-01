@@ -1,98 +1,52 @@
 /* ═══════════════════════════════════════════════
-   VFStore · camada de dados do agendamento
+   VFStore · camada de dados dos portais
    ───────────────────────────────────────────────
-   Persistência em localStorage (chaves "vf:*").
-   Toda a aplicação (área do paciente e painel
-   admin) conversa apenas com esta API — para
-   migrar a um backend real, basta reimplementar
-   estas funções sobre fetch() mantendo as
-   assinaturas.
+   API única e assíncrona com dois modos:
+
+   - "api": conversa com o servidor (server/server.js)
+     — dados compartilhados entre dispositivos.
+   - "local": persiste em localStorage — modo
+     demonstração para hospedagem estática.
+
+   O modo é detectado em VFStore.init(): se
+   GET {API_URL}/api/health responder, usa a API;
+   caso contrário, cai no modo local. As telas só
+   conhecem esta interface.
    ═══════════════════════════════════════════════ */
 
 const VFStore = (() => {
   const NS = "vf:";
 
-  const read = (key, fallback) => {
+  const lread = (key, fallback) => {
     try {
       const raw = localStorage.getItem(NS + key);
       return raw === null ? fallback : JSON.parse(raw);
-    } catch {
-      return fallback;
-    }
+    } catch { return fallback; }
   };
-  const write = (key, value) => localStorage.setItem(NS + key, JSON.stringify(value));
-  const remove = (key) => localStorage.removeItem(NS + key);
+  const lwrite = (key, value) => localStorage.setItem(NS + key, JSON.stringify(value));
+  const lremove = (key) => localStorage.removeItem(NS + key);
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-  async function hash(text) {
+  async function sha256(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  /* ── Pacientes e sessão ───────────────────── */
+  /* ── Utilidades de data ───────────────────── */
 
-  const patients = () => read("patients", []);
+  const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+  const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
-  async function signup({ nome, email, tel, senha }) {
-    const list = patients();
-    email = email.trim().toLowerCase();
-    if (!nome.trim() || !email || senha.length < 6) {
-      throw new Error("Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.");
-    }
-    if (list.some((p) => p.email === email)) {
-      throw new Error("Já existe uma conta com este e-mail.");
-    }
-    const patient = {
-      id: uid(),
-      nome: nome.trim(),
-      email,
-      tel: tel.trim(),
-      senhaHash: await hash(senha),
-      criadoEm: new Date().toISOString(),
-    };
-    list.push(patient);
-    write("patients", list);
-    write("session", { patientId: patient.id });
-    return patient;
-  }
-
-  async function login(email, senha) {
-    const patient = patients().find((p) => p.email === email.trim().toLowerCase());
-    if (!patient || patient.senhaHash !== (await hash(senha))) {
-      throw new Error("E-mail ou senha incorretos.");
-    }
-    write("session", { patientId: patient.id });
-    return patient;
-  }
-
-  const logout = () => remove("session");
-
-  const currentPatient = () => {
-    const session = read("session", null);
-    return session ? patients().find((p) => p.id === session.patientId) || null : null;
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
 
-  /* ── Admin ────────────────────────────────── */
-
-  const adminConfigured = () => Boolean(read("adminPass", null));
-
-  async function adminSetup(senha) {
-    if (senha.length < 6) throw new Error("Use uma senha com pelo menos 6 caracteres.");
-    write("adminPass", await hash(senha));
-    write("adminSession", true);
+  function formatDate(dateStr) {
+    const d = new Date(dateStr + "T12:00:00");
+    return `${WEEKDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`;
   }
-
-  async function adminLogin(senha) {
-    if (read("adminPass", null) !== (await hash(senha))) throw new Error("Senha incorreta.");
-    write("adminSession", true);
-  }
-
-  const adminLogged = () => read("adminSession", false) === true;
-  const adminLogout = () => remove("adminSession");
-
-  /* ── Disponibilidade ──────────────────────── */
-  /* Mapa dia-da-semana (0=dom … 6=sáb) → horários livres do modelo semanal. */
 
   const DEFAULT_AVAILABILITY = {
     1: ["09:00", "10:00", "11:00", "14:00", "15:00", "19:00", "20:00"],
@@ -102,101 +56,256 @@ const VFStore = (() => {
     5: ["09:00", "10:00", "11:00", "14:00", "15:00"],
   };
 
-  const availability = () => read("availability", DEFAULT_AVAILABILITY);
-  const setAvailability = (map) => write("availability", map);
+  /* ══════════ ADAPTADOR LOCAL ══════════ */
 
-  /* ── Agendamentos ─────────────────────────── */
+  const local = {
+    async signup({ nome, email, tel, senha }) {
+      const list = lread("patients", []);
+      email = email.trim().toLowerCase();
+      if (!nome.trim() || !email || senha.length < 6) {
+        throw new Error("Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.");
+      }
+      if (list.some((p) => p.email === email)) throw new Error("Já existe uma conta com este e-mail.");
+      const patient = {
+        id: uid(), nome: nome.trim(), email, tel: tel.trim(),
+        senhaHash: await sha256(senha), criadoEm: new Date().toISOString(),
+      };
+      list.push(patient);
+      lwrite("patients", list);
+      lwrite("session", { patientId: patient.id });
+      return patient;
+    },
 
-  const appointments = () => read("appointments", []);
-  const saveAppointments = (list) => write("appointments", list);
+    async login(email, senha) {
+      const patient = lread("patients", []).find((p) => p.email === email.trim().toLowerCase());
+      if (!patient || patient.senhaHash !== (await sha256(senha))) {
+        throw new Error("E-mail ou senha incorretos.");
+      }
+      lwrite("session", { patientId: patient.id });
+      return patient;
+    },
 
-  const todayStr = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    async logout() { lremove("session"); },
+
+    async me() {
+      const session = lread("session", null);
+      return session ? lread("patients", []).find((p) => p.id === session.patientId) || null : null;
+    },
+
+    async adminConfigured() { return Boolean(lread("adminPass", null)); },
+    async adminSetup(senha) {
+      if (senha.length < 6) throw new Error("Use uma senha com pelo menos 6 caracteres.");
+      lwrite("adminPass", await sha256(senha));
+      lwrite("adminSession", true);
+    },
+    async adminLogin(senha) {
+      if (lread("adminPass", null) !== (await sha256(senha))) throw new Error("Senha incorreta.");
+      lwrite("adminSession", true);
+    },
+    async adminLogged() { return lread("adminSession", false) === true; },
+    async adminLogout() { lremove("adminSession"); },
+
+    async availability() { return lread("availability", DEFAULT_AVAILABILITY); },
+    async setAvailability(map) { lwrite("availability", map); },
+
+    async slotsFor(dateStr) {
+      const weekday = new Date(dateStr + "T12:00:00").getDay();
+      const base = (await this.availability())[weekday] || [];
+      const taken = lread("appointments", [])
+        .filter((a) => a.data === dateStr && a.status !== "cancelada")
+        .map((a) => a.hora);
+      return base.filter((h) => !taken.includes(h));
+    },
+
+    async myAppointments() {
+      const me = await this.me();
+      return me ? lread("appointments", []).filter((a) => a.patientId === me.id) : [];
+    },
+
+    async allAppointments() {
+      const patients = lread("patients", []);
+      return lread("appointments", []).map((a) => {
+        const p = patients.find((x) => x.id === a.patientId);
+        return { ...a, patient: p ? { id: p.id, nome: p.nome, email: p.email, tel: p.tel } : null };
+      });
+    },
+
+    async book(data, hora) {
+      const me = await this.me();
+      if (!(await this.slotsFor(data)).includes(hora)) {
+        throw new Error("Este horário acabou de ser ocupado. Escolha outro, por favor.");
+      }
+      const list = lread("appointments", []);
+      const appointment = { id: uid(), patientId: me.id, data, hora, status: "pendente", criadoEm: new Date().toISOString() };
+      list.push(appointment);
+      lwrite("appointments", list);
+      return appointment;
+    },
+
+    async setStatus(id, status) {
+      const list = lread("appointments", []);
+      const appointment = list.find((a) => a.id === id);
+      if (appointment) { appointment.status = status; lwrite("appointments", list); }
+    },
+
+    async myThread() {
+      const me = await this.me();
+      return me ? lread("messages", []).filter((m) => m.patientId === me.id) : [];
+    },
+    async sendMyMessage(texto) {
+      const me = await this.me();
+      texto = texto.trim();
+      if (!me || !texto) return;
+      const list = lread("messages", []);
+      list.push({ id: uid(), patientId: me.id, de: "paciente", texto, em: new Date().toISOString(), lida: false });
+      lwrite("messages", list);
+    },
+    async markMyRead() {
+      const me = await this.me();
+      if (!me) return;
+      const list = lread("messages", []);
+      list.forEach((m) => { if (m.patientId === me.id && m.de === "psicologa") m.lida = true; });
+      lwrite("messages", list);
+    },
+
+    async allMessages() { return lread("messages", []); },
+    async sendTo(patientId, texto) {
+      texto = texto.trim();
+      if (!texto) return;
+      const list = lread("messages", []);
+      list.push({ id: uid(), patientId, de: "psicologa", texto, em: new Date().toISOString(), lida: false });
+      lwrite("messages", list);
+    },
+    async markReadFor(patientId) {
+      const list = lread("messages", []);
+      list.forEach((m) => { if (m.patientId === patientId && m.de === "paciente") m.lida = true; });
+      lwrite("messages", list);
+    },
+
+    async patientsList() {
+      return lread("patients", []).map((p) => ({ id: p.id, nome: p.nome, email: p.email, tel: p.tel }));
+    },
   };
 
-  function slotsFor(dateStr) {
-    const weekday = new Date(dateStr + "T12:00:00").getDay();
-    const base = availability()[weekday] || [];
-    const taken = appointments()
-      .filter((a) => a.data === dateStr && a.status !== "cancelada")
-      .map((a) => a.hora);
-    return base.filter((h) => !taken.includes(h));
-  }
+  /* ══════════ ADAPTADOR API ══════════ */
 
-  function book(patientId, data, hora) {
-    if (!slotsFor(data).includes(hora)) {
-      throw new Error("Este horário acabou de ser ocupado. Escolha outro, por favor.");
+  let apiBase = "";
+
+  async function call(pathname, { method = "GET", body, admin = false } = {}) {
+    const headers = { "Content-Type": "application/json" };
+    const token = lread(admin ? "atoken" : "ptoken", null);
+    if (token) headers.Authorization = "Bearer " + token;
+    let response;
+    try {
+      response = await fetch(apiBase + pathname, {
+        method, headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch {
+      throw new Error("Sem conexão com o servidor. Tente novamente.");
     }
-    const list = appointments();
-    const appointment = {
-      id: uid(),
-      patientId,
-      data,
-      hora,
-      status: "pendente",
-      criadoEm: new Date().toISOString(),
-    };
-    list.push(appointment);
-    saveAppointments(list);
-    return appointment;
-  }
-
-  function setAppointmentStatus(id, status) {
-    const list = appointments();
-    const appointment = list.find((a) => a.id === id);
-    if (appointment) {
-      appointment.status = status;
-      saveAppointments(list);
+    let data = null;
+    try { data = await response.json(); } catch {}
+    if (!response.ok) {
+      if (response.status === 401) lremove(admin ? "atoken" : "ptoken");
+      throw new Error((data && data.error) || "Algo deu errado. Tente novamente.");
     }
+    return data;
   }
 
-  /* ── Mensagens ────────────────────────────── */
-  /* Uma thread por paciente; "de" é "paciente" ou "psicologa". */
+  const api = {
+    async signup(dados) {
+      const { token, patient } = await call("/api/signup", { method: "POST", body: dados });
+      lwrite("ptoken", token);
+      return patient;
+    },
+    async login(email, senha) {
+      const { token, patient } = await call("/api/login", { method: "POST", body: { email, senha } });
+      lwrite("ptoken", token);
+      return patient;
+    },
+    async logout() { lremove("ptoken"); },
+    async me() {
+      if (!lread("ptoken", null)) return null;
+      try { return await call("/api/me"); } catch { return null; }
+    },
 
-  const messages = () => read("messages", []);
+    async adminConfigured() { return (await call("/api/admin/status")).configured; },
+    async adminSetup(senha) {
+      const { token } = await call("/api/admin/setup", { method: "POST", body: { senha } });
+      lwrite("atoken", token);
+    },
+    async adminLogin(senha) {
+      const { token } = await call("/api/admin/login", { method: "POST", body: { senha } });
+      lwrite("atoken", token);
+    },
+    async adminLogged() {
+      if (!lread("atoken", null)) return false;
+      try { await call("/api/admin/me", { admin: true }); return true; } catch { return false; }
+    },
+    async adminLogout() { lremove("atoken"); },
 
-  function sendMessage(patientId, de, texto) {
-    texto = texto.trim();
-    if (!texto) return;
-    const list = messages();
-    list.push({ id: uid(), patientId, de, texto, em: new Date().toISOString(), lida: false });
-    write("messages", list);
-  }
+    async availability() { return call("/api/availability"); },
+    async setAvailability(map) { return call("/api/availability", { method: "PUT", body: { availability: map }, admin: true }); },
+    async slotsFor(date) { return call("/api/slots?date=" + date); },
 
-  function threadFor(patientId) {
-    return messages().filter((m) => m.patientId === patientId);
-  }
+    async myAppointments() { return call("/api/appointments"); },
+    async allAppointments() { return call("/api/appointments", { admin: true }); },
+    async book(data, hora) { return call("/api/appointments", { method: "POST", body: { data, hora } }); },
+    async setStatus(id, status, { admin = false } = {}) {
+      return call("/api/appointments/" + id, { method: "PATCH", body: { status }, admin });
+    },
 
-  function unreadCount(patientId, para) {
-    return threadFor(patientId).filter((m) => m.de !== para && !m.lida).length;
-  }
+    async myThread() { return call("/api/messages"); },
+    async sendMyMessage(texto) { return call("/api/messages", { method: "POST", body: { texto } }); },
+    async markMyRead() { return call("/api/messages/read", { method: "POST", body: {} }); },
 
-  function markThreadRead(patientId, leitor) {
-    const list = messages();
-    list.forEach((m) => {
-      if (m.patientId === patientId && m.de !== leitor) m.lida = true;
-    });
-    write("messages", list);
-  }
+    async allMessages() { return call("/api/messages", { admin: true }); },
+    async sendTo(patientId, texto) { return call("/api/messages", { method: "POST", body: { patientId, texto }, admin: true }); },
+    async markReadFor(patientId) { return call("/api/messages/read", { method: "POST", body: { patientId }, admin: true }); },
 
-  /* ── Utilidades de data ───────────────────── */
-
-  const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-  const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-
-  function formatDate(dateStr) {
-    const d = new Date(dateStr + "T12:00:00");
-    return `${WEEKDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`;
-  }
-
-  return {
-    uid, hash,
-    patients, signup, login, logout, currentPatient,
-    adminConfigured, adminSetup, adminLogin, adminLogged, adminLogout,
-    availability, setAvailability,
-    appointments, slotsFor, book, setAppointmentStatus, todayStr,
-    messages, sendMessage, threadFor, unreadCount, markThreadRead,
-    formatDate, WEEKDAYS,
+    async patientsList() { return call("/api/patients", { admin: true }); },
   };
+
+  /* ══════════ FACHADA ══════════ */
+
+  let backend = local;
+  let mode = "local";
+
+  async function init() {
+    const cfg = window.VF_CONFIG_OVERRIDE || window.VF_CONFIG || {};
+    apiBase = (cfg.API_URL || "").replace(/\/$/, "");
+    try {
+      const response = await fetch(apiBase + "/api/health", { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.ok === true && data.service === "vf") {
+          backend = api;
+          mode = "api";
+        }
+      }
+    } catch { /* segue no modo local */ }
+    return mode;
+  }
+
+  const facade = {
+    init,
+    getMode: () => mode,
+    todayStr, formatDate, WEEKDAYS,
+  };
+
+  // Delega cada método ao backend ativo no momento da chamada
+  [
+    "signup", "login", "logout", "me",
+    "adminConfigured", "adminSetup", "adminLogin", "adminLogged", "adminLogout",
+    "availability", "setAvailability", "slotsFor",
+    "myAppointments", "allAppointments", "book", "setStatus",
+    "myThread", "sendMyMessage", "markMyRead",
+    "allMessages", "sendTo", "markReadFor",
+    "patientsList",
+  ].forEach((name) => {
+    facade[name] = (...args) => backend[name].apply(backend, args);
+  });
+
+  return facade;
 })();

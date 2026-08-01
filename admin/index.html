@@ -29,7 +29,7 @@
   </header>
 
   <!-- ══════════ LOGIN / PRIMEIRO ACESSO ══════════ -->
-  <main class="auth-wrap" id="authView">
+  <main class="auth-wrap" id="authView" hidden>
     <div class="auth-card">
       <div class="auth-seal">VF</div>
       <h1 id="authTitle">Painel de Controle</h1>
@@ -121,15 +121,21 @@
 
   <div class="toast" id="toast" role="status"></div>
 
+  <script src="../assets/js/config.js"></script>
   <script src="../assets/js/store.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const HOURS = ["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00"];
     const DAY_NAMES = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+    const escapeHtml = (s) => s.replace(/</g, "&lt;");
 
+    let allAppts = [];
+    let allMsgs = [];
+    let patients = [];
     let availDraft = null;
     let availDay = 1;
     let openThread = null;
+    let setupMode = false;
 
     let toastTimer;
     function toast(text) {
@@ -141,14 +147,15 @@
     }
 
     /* ── Autenticação ── */
-    const isSetup = !VFStore.adminConfigured();
-    if (isSetup) {
-      $("authTitle").textContent = "Primeiro acesso";
-      $("authSub").textContent = "Crie a senha do seu painel.";
-      $("authPassLabel").textContent = "Nova senha (mín. 6 caracteres)";
-      $("authPass2Field").hidden = false;
-      $("authSubmit").textContent = "Criar senha e entrar";
-      $("authHint").textContent = "Guarde esta senha — ela será pedida em todos os acessos ao painel.";
+    function applyAuthMode() {
+      if (setupMode) {
+        $("authTitle").textContent = "Primeiro acesso";
+        $("authSub").textContent = "Crie a senha do seu painel.";
+        $("authPassLabel").textContent = "Nova senha (mín. 6 caracteres)";
+        $("authPass2Field").hidden = false;
+        $("authSubmit").textContent = "Criar senha e entrar";
+        $("authHint").textContent = "Guarde esta senha — ela será pedida em todos os acessos ao painel.";
+      }
     }
 
     $("authForm").addEventListener("submit", async (e) => {
@@ -156,36 +163,38 @@
       const err = $("authError");
       err.classList.remove("is-visible");
       try {
-        if (isSetup) {
+        if (setupMode) {
           if ($("authPass").value !== $("authPass2").value) throw new Error("As senhas não conferem.");
           await VFStore.adminSetup($("authPass").value);
         } else {
           await VFStore.adminLogin($("authPass").value);
         }
-        boot();
+        await boot();
       } catch (ex) {
         err.textContent = ex.message;
         err.classList.add("is-visible");
       }
     });
 
-    $("logoutBtn").addEventListener("click", () => { VFStore.adminLogout(); location.reload(); });
+    $("logoutBtn").addEventListener("click", async () => { await VFStore.adminLogout(); location.reload(); });
 
     /* ── Helpers ── */
-    const patientById = (id) => VFStore.patients().find((p) => p.id === id);
+    const patientById = (id) => patients.find((p) => p.id === id) || (allAppts.find((a) => a.patientId === id) || {}).patient || null;
     const telDigits = (tel) => (tel || "").replace(/\D/g, "");
     const waLink = (tel) => {
       const d = telDigits(tel);
       return d ? `https://wa.me/${d.length <= 11 ? "55" + d : d}` : null;
     };
+    const threadFor = (patientId) => allMsgs.filter((m) => m.patientId === patientId);
+    const unreadFrom = (patientId) => threadFor(patientId).filter((m) => m.de === "paciente" && !m.lida).length;
 
     function apptRow(a, actions) {
-      const p = patientById(a.patientId);
+      const p = a.patient || patientById(a.patientId);
       const row = document.createElement("div");
       row.className = "appt";
       row.innerHTML = `
         <div class="appt-when"><strong>${VFStore.formatDate(a.data)}</strong><span>${a.hora}</span></div>
-        <div class="appt-who"><strong>${p ? p.nome : "Paciente removido"}</strong><span>${p ? p.tel + " · " + p.email : ""}</span></div>
+        <div class="appt-who"><strong>${p ? escapeHtml(p.nome) : "Paciente removido"}</strong><span>${p ? escapeHtml(p.tel + " · " + p.email) : ""}</span></div>
         <span class="badge badge-${a.status}">${a.status}</span>`;
       const wrap = document.createElement("div");
       wrap.className = "appt-actions";
@@ -209,10 +218,18 @@
       return row;
     }
 
+    async function changeStatus(id, status, msg) {
+      try {
+        await VFStore.setStatus(id, status, { admin: true });
+        await refreshData();
+        toast(msg);
+      } catch (err) { toast(err.message); }
+    }
+
     /* ── Agenda ── */
     function renderAgenda() {
       const today = VFStore.todayStr();
-      const all = VFStore.appointments().sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
+      const all = [...allAppts].sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
       const pending = all.filter((a) => a.status === "pendente" && a.data >= today);
       const confirmed = all.filter((a) => a.status === "confirmada" && a.data >= today);
       const history = all.filter((a) => a.data < today || a.status === "cancelada").slice(-15).reverse();
@@ -220,14 +237,14 @@
       const pw = $("pendingList"); pw.innerHTML = "";
       if (!pending.length) pw.innerHTML = '<p class="empty">Nenhuma solicitação aguardando.</p>';
       pending.forEach((a) => pw.appendChild(apptRow(a, [
-        ["Confirmar", "btn-primary", () => { VFStore.setAppointmentStatus(a.id, "confirmada"); refresh(); toast("Sessão confirmada."); }],
-        ["Recusar", "btn-danger", () => { VFStore.setAppointmentStatus(a.id, "cancelada"); refresh(); toast("Solicitação recusada."); }],
+        ["Confirmar", "btn-primary", () => changeStatus(a.id, "confirmada", "Sessão confirmada.")],
+        ["Recusar", "btn-danger", () => changeStatus(a.id, "cancelada", "Solicitação recusada.")],
       ])));
 
       const cw = $("confirmedList"); cw.innerHTML = "";
       if (!confirmed.length) cw.innerHTML = '<p class="empty">Nenhuma sessão confirmada por vir.</p>';
       confirmed.forEach((a) => cw.appendChild(apptRow(a, [
-        ["Cancelar", "btn-danger", () => { if (confirm("Cancelar esta sessão?")) { VFStore.setAppointmentStatus(a.id, "cancelada"); refresh(); toast("Sessão cancelada."); } }],
+        ["Cancelar", "btn-danger", () => { if (confirm("Cancelar esta sessão?")) changeStatus(a.id, "cancelada", "Sessão cancelada."); }],
       ])));
 
       const hw = $("historyList"); hw.innerHTML = "";
@@ -247,13 +264,13 @@
     function renderThreads() {
       const wrap = $("threadList");
       wrap.innerHTML = "";
-      const ids = [...new Set(VFStore.messages().map((m) => m.patientId))];
+      const ids = [...new Set(allMsgs.map((m) => m.patientId))];
       if (!ids.length) {
         wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhuma conversa ainda.</p>';
       }
       let totalUnread = 0;
       ids
-        .map((id) => ({ id, last: VFStore.threadFor(id).at(-1), unread: VFStore.unreadCount(id, "psicologa") }))
+        .map((id) => ({ id, last: threadFor(id).at(-1), unread: unreadFrom(id) }))
         .sort((a, b) => b.last.em.localeCompare(a.last.em))
         .forEach(({ id, last, unread }) => {
           totalUnread += unread;
@@ -262,7 +279,7 @@
           btn.className = "thread-item";
           btn.innerHTML = `
             <span class="avatar">${p ? p.nome[0].toUpperCase() : "?"}</span>
-            <span class="thread-info"><strong>${p ? p.nome : "Paciente"}</strong><span>${last.de === "psicologa" ? "Você: " : ""}${last.texto.replace(/</g, "&lt;")}</span></span>
+            <span class="thread-info"><strong>${p ? escapeHtml(p.nome) : "Paciente"}</strong><span>${last.de === "psicologa" ? "Você: " : ""}${escapeHtml(last.texto)}</span></span>
             ${unread ? `<span class="pill" style="background:var(--caramel);color:#fff;border-radius:999px;padding:2px 8px;font-size:0.72rem">${unread}</span>` : ""}`;
           btn.addEventListener("click", () => { openThread = id; renderChat(); });
           wrap.appendChild(btn);
@@ -280,33 +297,38 @@
       $("chatWith").textContent = p ? p.nome : "Conversa";
       const box = $("chatBox");
       box.innerHTML = "";
-      VFStore.threadFor(openThread).forEach((m) => {
+      threadFor(openThread).forEach((m) => {
         const b = document.createElement("div");
         b.className = "bubble " + (m.de === "psicologa" ? "bubble-me" : "bubble-them");
         const t = new Date(m.em);
-        b.innerHTML = `${m.texto.replace(/</g, "&lt;")}<time>${t.getDate()}/${t.getMonth() + 1} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time>`;
+        b.innerHTML = `${escapeHtml(m.texto)}<time>${t.getDate()}/${t.getMonth() + 1} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time>`;
         box.appendChild(b);
       });
       box.scrollTop = box.scrollHeight;
-      VFStore.markThreadRead(openThread, "psicologa");
-      renderThreads();
-      $("threadsCard").hidden = true;
+      VFStore.markReadFor(openThread).then(() => {
+        allMsgs.forEach((m) => { if (m.patientId === openThread && m.de === "paciente") m.lida = true; });
+        renderThreads();
+        $("threadsCard").hidden = true;
+      });
     }
 
     $("backThreads").addEventListener("click", () => { openThread = null; renderChat(); });
 
-    $("chatForm").addEventListener("submit", (e) => {
+    $("chatForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const input = $("chatInput");
       if (!input.value.trim() || !openThread) return;
-      VFStore.sendMessage(openThread, "psicologa", input.value);
-      input.value = "";
-      renderChat();
+      try {
+        await VFStore.sendTo(openThread, input.value);
+        input.value = "";
+        await refreshData();
+        renderChat();
+      } catch (err) { toast(err.message); }
     });
 
     /* ── Disponibilidade ── */
-    function renderAvail() {
-      if (!availDraft) availDraft = JSON.parse(JSON.stringify(VFStore.availability()));
+    async function renderAvail() {
+      if (!availDraft) availDraft = JSON.parse(JSON.stringify(await VFStore.availability()));
       const days = $("availDays");
       days.innerHTML = "";
       for (let d = 0; d < 7; d++) {
@@ -335,27 +357,28 @@
       });
     }
 
-    $("saveAvail").addEventListener("click", () => {
-      VFStore.setAvailability(availDraft);
-      toast("Horários salvos.");
+    $("saveAvail").addEventListener("click", async () => {
+      try {
+        await VFStore.setAvailability(availDraft);
+        toast("Horários salvos.");
+      } catch (err) { toast(err.message); }
     });
 
     /* ── Pacientes ── */
     function renderPatients() {
       const wrap = $("patientList");
       wrap.innerHTML = "";
-      const list = VFStore.patients();
-      if (!list.length) {
+      if (!patients.length) {
         wrap.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum paciente cadastrado ainda.</p>';
         return;
       }
-      list.forEach((p) => {
-        const sessions = VFStore.appointments().filter((a) => a.patientId === p.id && a.status !== "cancelada").length;
+      patients.forEach((p) => {
+        const sessions = allAppts.filter((a) => a.patientId === p.id && a.status !== "cancelada").length;
         const row = document.createElement("div");
         row.className = "list-row";
         row.innerHTML = `
           <span class="avatar">${p.nome[0].toUpperCase()}</span>
-          <div class="appt-who"><strong>${p.nome}</strong><span>${p.email} · ${p.tel}</span></div>
+          <div class="appt-who"><strong>${escapeHtml(p.nome)}</strong><span>${escapeHtml(p.email + " · " + p.tel)}</span></div>
           <span class="muted">${sessions} sessão(ões)</span>`;
         if (waLink(p.tel)) {
           const wa = document.createElement("a");
@@ -371,6 +394,10 @@
     }
 
     /* ── Navegação ── */
+    function activePanel() {
+      const tab = document.querySelector(".nav-tab.is-active");
+      return tab ? tab.dataset.panel : "agenda";
+    }
     function setPanel(name) {
       document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.panel === name));
       document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("is-active", p.id === "panel-" + name));
@@ -382,28 +409,41 @@
       t.addEventListener("click", () => setPanel(t.dataset.panel))
     );
 
-    function refresh() {
+    /* ── Dados ── */
+    async function refreshData() {
+      [allAppts, allMsgs, patients] = await Promise.all([
+        VFStore.allAppointments(),
+        VFStore.allMessages(),
+        VFStore.patientsList(),
+      ]);
       renderAgenda();
-      renderThreads();
+      if (activePanel() === "mensagens") { openThread ? renderChat() : renderThreads(); } else renderThreads();
+      if (activePanel() === "pacientes") renderPatients();
     }
 
-    function boot() {
-      const logged = VFStore.adminLogged();
+    async function boot() {
+      const logged = await VFStore.adminLogged();
       $("authView").hidden = logged;
       $("appView").hidden = !logged;
       $("logoutBtn").hidden = !logged;
-      if (!logged) return;
-      refresh();
+      if (!logged) {
+        setupMode = !(await VFStore.adminConfigured());
+        applyAuthMode();
+        return;
+      }
+      await refreshData();
     }
 
-    // Atualiza em tempo real se a área do paciente estiver aberta em outra aba
-    window.addEventListener("storage", () => {
-      if (!VFStore.adminLogged()) return;
-      renderAgenda();
-      if (openThread) renderChat(); else renderThreads();
-    });
-
-    boot();
+    (async () => {
+      const mode = await VFStore.init();
+      if (mode === "local") {
+        $("authHint").textContent = "Modo demonstração: os dados ficam salvos apenas neste navegador.";
+      } else {
+        setInterval(() => { if (!$("appView").hidden) refreshData(); }, 12000);
+      }
+      window.addEventListener("storage", () => { if (!$("appView").hidden) refreshData(); });
+      await boot();
+    })();
   </script>
 </body>
 </html>

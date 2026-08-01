@@ -30,7 +30,7 @@
   </header>
 
   <!-- ══════════ AUTENTICAÇÃO ══════════ -->
-  <main class="auth-wrap" id="authView">
+  <main class="auth-wrap" id="authView" hidden>
     <div class="auth-card">
       <div class="auth-seal">VF</div>
       <h1>Bem-vindo(a) ao seu espaço</h1>
@@ -75,7 +75,7 @@
         <button type="submit" class="btn btn-primary btn-block">Criar minha conta</button>
       </form>
 
-      <p class="hint">Seus dados ficam protegidos e são usados apenas para o seu atendimento.</p>
+      <p class="hint" id="authHint">Seus dados ficam protegidos e são usados apenas para o seu atendimento.</p>
     </div>
   </main>
 
@@ -148,15 +148,18 @@
 
   <div class="toast" id="toast" role="status"></div>
 
+  <script src="../assets/js/config.js"></script>
   <script src="../assets/js/store.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const WHATSAPP = "5532984146528";
+    const escapeHtml = (s) => s.replace(/</g, "&lt;");
 
     let selectedDate = null;
     let selectedSlot = null;
+    let myAppts = [];
+    let myThread = [];
 
-    /* ── Toast ── */
     let toastTimer;
     function toast(text) {
       const el = $("toast");
@@ -187,7 +190,7 @@
       e.preventDefault();
       try {
         await VFStore.login($("loginEmail").value, $("loginSenha").value);
-        boot();
+        await boot();
       } catch (err) { showAuthError(err.message); }
     });
 
@@ -200,48 +203,50 @@
           tel: $("suTel").value,
           senha: $("suSenha").value,
         });
-        boot();
+        await boot();
         toast("Conta criada — bem-vindo(a)!");
       } catch (err) { showAuthError(err.message); }
     });
 
-    $("logoutBtn").addEventListener("click", () => {
-      VFStore.logout();
+    $("logoutBtn").addEventListener("click", async () => {
+      await VFStore.logout();
       location.reload();
     });
 
     /* ── Agendamento ── */
-    function renderDays() {
+    async function renderDays() {
       const wrap = $("dayScroll");
       wrap.innerHTML = "";
+      const availability = await VFStore.availability();
       const today = new Date();
       for (let i = 1; i <= 30; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        if (!(VFStore.availability()[d.getDay()] || []).length) continue;
+        if (!(availability[d.getDay()] || []).length) continue;
         const btn = document.createElement("button");
         btn.className = "chip is-day" + (dateStr === selectedDate ? " is-selected" : "");
         btn.innerHTML = `<small>${VFStore.WEEKDAYS[d.getDay()]}</small><strong>${d.getDate()}/${d.getMonth() + 1}</strong>`;
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           selectedDate = dateStr;
           selectedSlot = null;
           $("confirmCard").hidden = true;
-          renderDays();
-          renderSlots();
+          await renderDays();
+          await renderSlots();
         });
         wrap.appendChild(btn);
       }
     }
 
-    function renderSlots() {
+    async function renderSlots() {
       const card = $("slotCard");
       if (!selectedDate) { card.hidden = true; return; }
       card.hidden = false;
       $("slotDateLabel").textContent = VFStore.formatDate(selectedDate);
       const row = $("slotRow");
+      row.innerHTML = '<p class="muted">Carregando…</p>';
+      const slots = await VFStore.slotsFor(selectedDate);
       row.innerHTML = "";
-      const slots = VFStore.slotsFor(selectedDate);
       if (!slots.length) {
         row.innerHTML = '<p class="empty"><span class="glyph">✦</span>Nenhum horário livre neste dia — tente outro.</p>';
         return;
@@ -250,9 +255,9 @@
         const btn = document.createElement("button");
         btn.className = "chip" + (h === selectedSlot ? " is-selected" : "");
         btn.textContent = h;
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           selectedSlot = h;
-          renderSlots();
+          await renderSlots();
           $("confirmCard").hidden = false;
           $("confirmLabel").textContent = `${VFStore.formatDate(selectedDate)} às ${h} · sessão online de 50 minutos`;
           $("confirmCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -261,20 +266,19 @@
       });
     }
 
-    $("bookBtn").addEventListener("click", () => {
+    $("bookBtn").addEventListener("click", async () => {
       try {
-        VFStore.book(VFStore.currentPatient().id, selectedDate, selectedSlot);
+        await VFStore.book(selectedDate, selectedSlot);
         toast("Pedido enviado! A Viviane confirma em até 24h úteis.");
         selectedDate = null; selectedSlot = null;
         $("slotCard").hidden = true;
         $("confirmCard").hidden = true;
-        renderDays();
-        renderAppointments();
-        renderNextCard();
+        await refreshData();
+        await renderDays();
         setPanel("sessoes");
       } catch (err) {
         toast(err.message);
-        renderSlots();
+        await renderSlots();
       }
     });
 
@@ -291,13 +295,13 @@
         const btn = document.createElement("button");
         btn.className = "btn btn-danger btn-sm";
         btn.textContent = "Cancelar";
-        btn.addEventListener("click", () => {
-          if (confirm("Cancelar esta sessão?")) {
-            VFStore.setAppointmentStatus(a.id, "cancelada");
-            renderAppointments();
-            renderNextCard();
+        btn.addEventListener("click", async () => {
+          if (!confirm("Cancelar esta sessão?")) return;
+          try {
+            await VFStore.setStatus(a.id, "cancelada");
+            await refreshData();
             toast("Sessão cancelada.");
-          }
+          } catch (err) { toast(err.message); }
         });
         const actions = document.createElement("div");
         actions.className = "appt-actions";
@@ -307,16 +311,9 @@
       return row;
     }
 
-    function myAppointments() {
-      const me = VFStore.currentPatient();
-      return VFStore.appointments()
-        .filter((a) => a.patientId === me.id)
-        .sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
-    }
-
     function renderAppointments() {
       const today = VFStore.todayStr();
-      const mine = myAppointments();
+      const mine = [...myAppts].sort((x, y) => (x.data + x.hora).localeCompare(y.data + y.hora));
       const up = mine.filter((a) => a.data >= today && a.status !== "cancelada");
       const past = mine.filter((a) => a.data < today || a.status === "cancelada");
       const upWrap = $("upcomingList");
@@ -326,11 +323,8 @@
       up.forEach((a) => upWrap.appendChild(apptRow(a, true)));
       if (!past.length) pastWrap.innerHTML = '<p class="empty">Seu histórico aparecerá aqui.</p>';
       past.slice(-12).reverse().forEach((a) => pastWrap.appendChild(apptRow(a, false)));
-    }
 
-    function renderNextCard() {
-      const today = VFStore.todayStr();
-      const next = myAppointments().find((a) => a.data >= today && a.status !== "cancelada");
+      const next = up[0];
       $("nextCard").hidden = !next;
       if (next) {
         $("nextWhen").textContent = `${VFStore.formatDate(next.data)} às ${next.hora}`;
@@ -340,77 +334,89 @@
 
     /* ── Mensagens ── */
     function renderChat() {
-      const me = VFStore.currentPatient();
       const box = $("chatBox");
-      const thread = VFStore.threadFor(me.id);
       box.innerHTML = "";
-      if (!thread.length) {
+      if (!myThread.length) {
         box.innerHTML = '<p class="empty"><span class="glyph">✦</span>Envie a primeira mensagem — a Viviane responde por aqui.</p>';
       }
-      thread.forEach((m) => {
+      myThread.forEach((m) => {
         const b = document.createElement("div");
         b.className = "bubble " + (m.de === "paciente" ? "bubble-me" : "bubble-them");
         const t = new Date(m.em);
-        b.innerHTML = `${m.texto.replace(/</g, "&lt;")}<time>${t.getDate()}/${t.getMonth() + 1} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time>`;
+        b.innerHTML = `${escapeHtml(m.texto)}<time>${t.getDate()}/${t.getMonth() + 1} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time>`;
         box.appendChild(b);
       });
       box.scrollTop = box.scrollHeight;
-      VFStore.markThreadRead(me.id, "paciente");
-      renderMsgPill();
     }
 
     function renderMsgPill() {
-      const me = VFStore.currentPatient();
-      if (!me) return;
-      const n = VFStore.unreadCount(me.id, "paciente");
+      const n = myThread.filter((m) => m.de === "psicologa" && !m.lida).length;
       $("msgPill").hidden = n === 0;
       $("msgPill").textContent = n;
     }
 
-    $("chatForm").addEventListener("submit", (e) => {
+    $("chatForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const input = $("chatInput");
       if (!input.value.trim()) return;
-      VFStore.sendMessage(VFStore.currentPatient().id, "paciente", input.value);
-      input.value = "";
-      renderChat();
+      try {
+        await VFStore.sendMyMessage(input.value);
+        input.value = "";
+        await refreshData();
+        renderChat();
+      } catch (err) { toast(err.message); }
     });
 
     /* ── Navegação de painéis ── */
+    function activePanel() {
+      const tab = document.querySelector(".nav-tab.is-active");
+      return tab ? tab.dataset.panel : "agendar";
+    }
     function setPanel(name) {
       document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.panel === name));
       document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("is-active", p.id === "panel-" + name));
-      if (name === "mensagens") renderChat();
+      if (name === "mensagens") {
+        renderChat();
+        VFStore.markMyRead().then(() => { myThread.forEach((m) => { if (m.de === "psicologa") m.lida = true; }); renderMsgPill(); });
+      }
     }
     document.querySelectorAll(".nav-tab").forEach((t) =>
       t.addEventListener("click", () => setPanel(t.dataset.panel))
     );
 
+    /* ── Dados ── */
+    async function refreshData() {
+      [myAppts, myThread] = await Promise.all([VFStore.myAppointments(), VFStore.myThread()]);
+      renderAppointments();
+      renderMsgPill();
+      if (activePanel() === "mensagens") renderChat();
+    }
+
     /* ── Boot ── */
-    function boot() {
-      const me = VFStore.currentPatient();
+    async function boot() {
+      const me = await VFStore.me();
       $("authView").hidden = Boolean(me);
       $("appView").hidden = !me;
       $("logoutBtn").hidden = !me;
       if (!me) return;
       $("patientName").textContent = me.nome.split(" ")[0];
       $("waFallback").href = `https://wa.me/${WHATSAPP}`;
-      renderDays();
-      renderNextCard();
-      renderAppointments();
-      renderMsgPill();
+      await refreshData();
+      await renderDays();
     }
 
-    // Atualiza em tempo real se o painel admin estiver aberto em outra aba
-    window.addEventListener("storage", () => {
-      if (!VFStore.currentPatient()) return;
-      renderNextCard();
-      renderAppointments();
-      renderMsgPill();
-      if (document.getElementById("panel-mensagens").classList.contains("is-active")) renderChat();
-    });
-
-    boot();
+    (async () => {
+      const mode = await VFStore.init();
+      if (mode === "local") {
+        $("authHint").textContent = "Modo demonstração: os dados ficam salvos apenas neste navegador.";
+      } else {
+        // dados compartilhados: atualiza sozinho a cada 12s
+        setInterval(() => { if (!$("appView").hidden) refreshData(); }, 12000);
+      }
+      // modo local: sincroniza com o painel aberto em outra aba
+      window.addEventListener("storage", () => { if (!$("appView").hidden) refreshData(); });
+      await boot();
+    })();
   </script>
 </body>
 </html>
