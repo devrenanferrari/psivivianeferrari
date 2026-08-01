@@ -412,18 +412,26 @@ h1 em, h2 em {
 
 .ribbon-track {
   display: flex;
-  gap: 2.4rem;
-  align-items: center;
-  white-space: nowrap;
   width: max-content;
-  animation: ribbon-scroll 28s linear infinite;
+  animation: ribbon-scroll 40s linear infinite;
   font-family: var(--font-display);
   font-style: italic;
   font-size: 1.05rem;
   letter-spacing: 0.08em;
 }
 
-.ribbon-track i { font-style: normal; font-size: 0.7rem; opacity: 0.7; }
+/* cada grupo é uma cópia idêntica e autocontida (gap embutido no padding),
+   então deslocar exatamente 50% (= 2 grupos) reinicia o loop sem salto */
+.ribbon-group {
+  display: flex;
+  gap: 2.4rem;
+  align-items: center;
+  white-space: nowrap;
+  padding-right: 2.4rem;
+  flex-shrink: 0;
+}
+
+.ribbon-group i { font-style: normal; font-size: 0.7rem; opacity: 0.7; }
 
 @keyframes ribbon-scroll {
   to { transform: translateX(-50%); }
