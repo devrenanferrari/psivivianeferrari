@@ -294,6 +294,12 @@ h1 em, h2 em {
 .main-nav a:hover::after { transform: scaleX(1); }
 
 .nav-account {
+  display: inline-block;
+  color: var(--cream);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 400;
+  letter-spacing: 0.05em;
   opacity: 1 !important;
   padding: 0.5rem 1.1rem;
   border: 1px solid rgba(255, 237, 218, 0.4);
@@ -1261,6 +1267,7 @@ html.js .reveal.is-visible { opacity: 1; transform: translateY(0); }
 @media (min-width: 761px) {
   .booking-paths { margin-bottom: 3.6rem; }
   .wizard { margin-top: 0.5rem; }
+  .main-nav .nav-account { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -1287,6 +1294,8 @@ html.js .reveal.is-visible { opacity: 1; transform: translateY(0); }
 
   .nav-toggle { display: flex; position: relative; z-index: 95; }
   .header-actions .btn { display: none; }
+  .nav-account-bar { display: none; }
+  .main-nav .nav-account { padding: 0.7rem 1.6rem; }
 
   .grid-2 { grid-template-columns: 1fr; }
   .portrait { max-width: min(90vw, 420px); margin-inline: auto; }
