@@ -27,7 +27,7 @@ assets/js/store.js     VFStore — camada de dados dos portais
 assets/js/config.js    URL da API usada pelos portais (VF_CONFIG.API_URL)
 assets/img/            Fotos (vf-1 sofá · vf-2 vestido branco · vf-3 consultório)
 server/server.js       API + servidor estático (Node + PostgreSQL)
-nixpacks.toml          Build da API no Railway (instala server/ com npm ci)
+package.json           Dependências do backend (pg) — usado no deploy do Railway
 railway.toml           Deploy da API no Railway (start command, healthcheck)
 ```
 
@@ -65,37 +65,38 @@ Toda a lógica conversa apenas com o **`VFStore`** (`assets/js/store.js`), uma f
 
 O backend (`server/`) é um servidor Node puro (só a dependência `pg`) que expõe a API em `/api/*` e persiste tudo em **PostgreSQL**. O site estático continua podendo ser publicado separadamente (GitHub Pages) — basta apontar o front-end para a URL da API.
 
-### 1. Banco de dados (Railway)
+### Já publicado
 
-No projeto Railway, adicione um plugin **PostgreSQL** (`+ New` → `Database` → `Add PostgreSQL`). O Railway cria a variável `DATABASE_URL` automaticamente.
+O projeto **psivivianeferrari** está criado no Railway (workspace "bytepay pagamentos"), com dois serviços:
 
-### 2. Serviço da API (Railway)
+- **Postgres** — banco de dados (rede privada, `DATABASE_URL` interno).
+- **api** — este servidor (`server/server.js`), com `DATABASE_URL=${{Postgres.DATABASE_URL}}` configurado e domínio público em `https://api-production-303c6.up.railway.app`.
 
-1. `+ New` → `GitHub Repo` → selecione este repositório (ou `New Empty Service` + deploy via CLI).
-2. Em **Variables**, adicione uma referência à variável do Postgres: `DATABASE_URL` → `${{Postgres.DATABASE_URL}}` (o Railway sugere isso automaticamente ao linkar os dois serviços).
-3. O build usa `nixpacks.toml` (instala as dependências de `server/` com `npm ci`) e `railway.toml` (comando de start `node server/server.js`, healthcheck em `/api/health`). Nenhuma configuração manual adicional é necessária.
-4. Ao final do deploy, o Railway gera um domínio público (`Settings` → `Networking` → `Generate Domain`). Essa é a URL da API.
+`assets/js/config.js` já aponta `API_URL` para esse domínio, então o site publicado usa dados reais e compartilhados. Para reimplantar depois de alterar o backend:
 
-O servidor cria as tabelas automaticamente na primeira execução (`ensureSchema()` em `server.js`) — não é preciso rodar migrations à parte.
-
-### 3. Conectar o site à API
-
-Em [`assets/js/config.js`](assets/js/config.js), defina:
-
-```js
-window.VF_CONFIG = {
-  API_URL: "https://SEU-SERVICO.up.railway.app",
-};
+```
+railway up --service api
 ```
 
-Publique essa alteração (GitHub Pages ou onde o site estiver hospedado) e os portais `/conta` e `/admin` passam a usar dados reais e compartilhados.
+(rode a partir da raiz do repositório, com o Railway CLI logado — `railway login` — e o projeto linkado — `railway status` confirma).
+
+**Pendente:** acessar `/admin` no site e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
+
+### Para recriar o deploy do zero (referência)
+
+1. **Banco de dados**: `railway add -d postgres` no projeto.
+2. **Serviço da API**: `railway add -s api` (Empty Service), depois `railway variables --service api --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}'`.
+3. **Deploy**: `railway up --service api` a partir da raiz do repositório — o Railway detecta Node pelo `package.json` da raiz (script `start` roda `node server/server.js`), instala as dependências e sobe o servidor. `railway.toml` define o healthcheck (`/api/health`) e a política de restart.
+4. **Domínio**: `railway domain --service api` gera a URL pública.
+5. Copie essa URL para `API_URL` em [`assets/js/config.js`](assets/js/config.js) e publique o site.
+
+O servidor cria as tabelas automaticamente na primeira execução (`ensureSchema()` em `server.js`) — não é preciso rodar migrations à parte.
 
 ### Rodando localmente
 
 ```
-cd server
 npm install
-DATABASE_URL="postgres://usuario:senha@localhost:5432/vf" node server.js
+DATABASE_URL="postgres://usuario:senha@localhost:5432/vf" node server/server.js
 ```
 
 Sem um Postgres à mão, use um container temporário:
@@ -105,7 +106,7 @@ docker run -d --name vf-pg -e POSTGRES_PASSWORD=vf -e POSTGRES_DB=vf -p 5432:543
 DATABASE_URL="postgres://postgres:vf@localhost:5432/vf" node server/server.js
 ```
 
-Com o servidor local rodando, abra `http://localhost:8787` — `config.js` com `API_URL: ""` já aponta para a própria origem.
+Com o servidor local rodando, abra `http://localhost:8787` — para usar o backend local em vez do Railway, troque temporariamente `API_URL` em `config.js` para `""`.
 
 ## Antes de publicar
 
