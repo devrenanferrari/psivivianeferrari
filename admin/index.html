@@ -765,6 +765,26 @@
           wa.rel = "noopener";
           actions.appendChild(wa);
         }
+        const delBtn = document.createElement("button");
+        delBtn.className = "btn btn-danger btn-sm";
+        delBtn.textContent = "Excluir";
+        delBtn.addEventListener("click", async () => {
+          const digitado = prompt(
+            `Isso vai apagar ${p.nome} e todo o histórico de sessões e mensagens dela(e), sem volta.\n\nPara confirmar, digite EXCLUIR:`
+          );
+          if (digitado === null) return;
+          if (digitado.trim().toUpperCase() !== "EXCLUIR") {
+            toast("Não digitou EXCLUIR certinho — nada foi apagado.");
+            return;
+          }
+          try {
+            await VFStore.deletePatient(p.id);
+            toast("Paciente excluído.");
+            await refreshData();
+            renderPatients();
+          } catch (err) { toast(err.message); }
+        });
+        actions.appendChild(delBtn);
         row.appendChild(actions);
         wrap.appendChild(row);
       });

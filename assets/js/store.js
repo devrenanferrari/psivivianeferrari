@@ -210,6 +210,12 @@ const VFStore = (() => {
       return { id: patient.id, nome: patient.nome, email: patient.email, tel: patient.tel };
     },
 
+    async deletePatient(id) {
+      lwrite("patients", lread("patients", []).filter((p) => p.id !== id));
+      lwrite("appointments", lread("appointments", []).filter((a) => a.patientId !== id));
+      lwrite("messages", lread("messages", []).filter((m) => m.patientId !== id));
+    },
+
     async exportPatientsCsv() {
       const rows = [["Nome", "E-mail", "WhatsApp", "Cadastro"]];
       lread("patients", []).forEach((p) => rows.push([p.nome, p.email, p.tel, new Date(p.criadoEm).toLocaleDateString("pt-BR")]));
@@ -319,6 +325,7 @@ const VFStore = (() => {
 
     async patientsList() { return call("/api/patients", { admin: true }); },
     async updatePatient(id, data) { return call("/api/patients/" + id, { method: "PATCH", body: data, admin: true }); },
+    async deletePatient(id) { return call("/api/patients/" + id, { method: "DELETE", admin: true }); },
 
     async exportPatientsCsv() { return fetchCsv("/api/export/patients"); },
     async exportAppointmentsCsv() { return fetchCsv("/api/export/appointments"); },
@@ -366,7 +373,7 @@ const VFStore = (() => {
     "myAppointments", "allAppointments", "book", "setStatus",
     "myThread", "sendMyMessage", "markMyRead",
     "allMessages", "sendTo", "markReadFor",
-    "patientsList", "updatePatient", "exportPatientsCsv", "exportAppointmentsCsv",
+    "patientsList", "updatePatient", "deletePatient", "exportPatientsCsv", "exportAppointmentsCsv",
   ].forEach((name) => {
     facade[name] = (...args) => backend[name].apply(backend, args);
   });

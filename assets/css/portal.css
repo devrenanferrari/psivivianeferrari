@@ -453,6 +453,7 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 400; color: var(--wi
 }
 
 .wfill {
+  display: block;
   width: 100%;
   height: 100%;
   background: var(--wine);

@@ -553,6 +553,15 @@ async function handleApi(req, res, url) {
     return json(res, 200, rowPatient(rows[0]));
   }
 
+  if (patientMatch && method === "DELETE") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    // ON DELETE CASCADE nas tabelas appointments/messages/patient_tokens já
+    // limpa tudo relacionado a esse paciente junto.
+    const { rows } = await pool.query("DELETE FROM patients WHERE id = $1 RETURNING id", [patientMatch[1]]);
+    if (!rows.length) return json(res, 404, { error: "Paciente não encontrado." });
+    return json(res, 200, { ok: true });
+  }
+
   /* — exportação CSV (admin) — */
   if (p === "/api/export/patients" && method === "GET") {
     if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
