@@ -54,25 +54,29 @@ Se paciente e painel estiverem abertos ao mesmo tempo (abas diferentes), as tela
 
 ### Arquitetura
 
-Toda a lógica conversa apenas com o **`VFStore`** (`assets/js/store.js`), uma fachada única com dois modos:
+Tudo — site público, `/conta`, `/admin` e a API — é servido por um único processo: `server/server.js`. Ele entrega os arquivos estáticos do repositório e responde `/api/*`, sempre na mesma origem. Não há mais uma cópia estática separada (GitHub Pages foi descontinuado como hospedagem — ver [Backend e deploy](#backend-e-deploy)).
 
-- **API** (`server/server.js` + PostgreSQL) — dados compartilhados entre todos os dispositivos. É o modo de produção, descrito em [Backend e deploy](#backend-e-deploy) abaixo.
-- **Local** (`localStorage`) — modo demonstração, usado automaticamente quando nenhuma API responde (ex.: abrindo o site sem backend configurado). Cada navegador enxerga só os próprios dados.
+O front-end conversa apenas com o **`VFStore`** (`assets/js/store.js`), uma fachada única com dois modos:
 
-`VFStore.init()` detecta o modo sozinho: tenta `GET {API_URL}/api/health` e, se responder, usa a API; senão cai no modo local. Nenhuma tela precisa saber qual dos dois está ativo.
+- **API** (`server/server.js` + PostgreSQL) — modo de produção, dados compartilhados entre todos os dispositivos.
+- **Local** (`localStorage`) — modo demonstração, usado automaticamente só se nenhuma API responder (ex.: abrindo os arquivos direto do disco, sem servidor).
+
+`VFStore.init()` detecta o modo sozinho: tenta `GET {API_URL}/api/health` e, se responder, usa a API; senão cai no modo local. Como `API_URL` fica vazio (`""`) em `config.js`, essa checagem é sempre na própria origem — nenhuma tela precisa saber qual modo está ativo.
 
 ## Backend e deploy
 
-O backend (`server/`) é um servidor Node puro (só a dependência `pg`) que expõe a API em `/api/*` e persiste tudo em **PostgreSQL**. O site estático continua podendo ser publicado separadamente (GitHub Pages) — basta apontar o front-end para a URL da API.
+O backend (`server/`) é um servidor Node puro (só a dependência `pg`) que persiste tudo em **PostgreSQL** e também serve o site estático — um único serviço faz as duas coisas.
 
 ### Já publicado
 
-O projeto **psivivianeferrari** está criado no Railway (workspace "bytepay pagamentos"), com dois serviços:
+Projeto **psivivianeferrari** no Railway (workspace "bytepay pagamentos"), com dois serviços:
 
 - **Postgres** — banco de dados (rede privada, `DATABASE_URL` interno).
-- **api** — este servidor (`server/server.js`), com `DATABASE_URL=${{Postgres.DATABASE_URL}}` configurado e domínio público em `https://api-production-303c6.up.railway.app`.
+- **api** — este servidor (`server/server.js`), com `DATABASE_URL=${{Postgres.DATABASE_URL}}` configurado. Domínios:
+  - `https://psivivianeferrari.com.br` — domínio próprio (DNS: CNAME `@` → `689abuaq.up.railway.app` + TXT `_railway-verify`, configurados no provedor de DNS do domínio).
+  - `https://api-production-303c6.up.railway.app` — domínio gerado pelo Railway, continua ativo como URL alternativa.
 
-`assets/js/config.js` já aponta `API_URL` para esse domínio, então o site publicado usa dados reais e compartilhados. Para reimplantar depois de alterar o backend:
+Para reimplantar depois de alterar o backend:
 
 ```
 railway up --service api
@@ -80,15 +84,14 @@ railway up --service api
 
 (rode a partir da raiz do repositório, com o Railway CLI logado — `railway login` — e o projeto linkado — `railway status` confirma).
 
-**Pendente:** acessar `/admin` no site e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
+**Pendente:** acessar `/admin` no domínio publicado e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
 
 ### Para recriar o deploy do zero (referência)
 
 1. **Banco de dados**: `railway add -d postgres` no projeto.
 2. **Serviço da API**: `railway add -s api` (Empty Service), depois `railway variables --service api --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}'`.
 3. **Deploy**: `railway up --service api` a partir da raiz do repositório — o Railway detecta Node pelo `package.json` da raiz (script `start` roda `node server/server.js`), instala as dependências e sobe o servidor. `railway.toml` define o healthcheck (`/api/health`) e a política de restart.
-4. **Domínio**: `railway domain --service api` gera a URL pública.
-5. Copie essa URL para `API_URL` em [`assets/js/config.js`](assets/js/config.js) e publique o site.
+4. **Domínio**: `railway domain --service api` gera a URL pública, ou `railway domain SEU-DOMINIO --service api` para usar um domínio próprio (o comando devolve os registros de DNS para cadastrar no provedor).
 
 O servidor cria as tabelas automaticamente na primeira execução (`ensureSchema()` em `server.js`) — não é preciso rodar migrations à parte.
 
@@ -106,7 +109,7 @@ docker run -d --name vf-pg -e POSTGRES_PASSWORD=vf -e POSTGRES_DB=vf -p 5432:543
 DATABASE_URL="postgres://postgres:vf@localhost:5432/vf" node server/server.js
 ```
 
-Com o servidor local rodando, abra `http://localhost:8787` — para usar o backend local em vez do Railway, troque temporariamente `API_URL` em `config.js` para `""`.
+Com o servidor local rodando, abra `http://localhost:8787` — `config.js` com `API_URL: ""` já aponta para a própria origem, local ou em produção.
 
 ## Antes de publicar
 
@@ -124,10 +127,10 @@ WhatsApp (`5532984146528`) e Instagram (`@psivivianeferrari`) já estão configu
 
 ## Publicação
 
-É um site 100% estático — funciona em GitHub Pages, Vercel, Netlify ou qualquer hospedagem simples. Para GitHub Pages: Settings → Pages → Deploy from branch → `main` → `/ (root)`.
+O site é publicado como parte do backend, no Railway — ver [Backend e deploy](#backend-e-deploy). Não há mais uma cópia estática separada (GitHub Pages foi descontinuado).
 
 ## Evoluções sugeridas
 
 - Lembrete automático de sessão por WhatsApp/e-mail.
 - Adicionar blog/conteúdos para SEO ("terapia online funciona?", etc.).
-- Domínio próprio + Google Business Profile para busca local.
+- Google Business Profile para busca local.

@@ -1,19 +1,19 @@
 /* ═══════════════════════════════════════════════
    Configuração dos portais VF
    ───────────────────────────────────────────────
-   API_URL:
-   - "" → autodetecção: se o site estiver rodando
-     pelo servidor Node (server/server.js), a API é
-     encontrada na mesma origem. Em qualquer outra
-     hospedagem, sem API_URL definida os portais
-     caem no modo demonstração (dados salvos apenas
-     no navegador).
-   - URL da API hospedada à parte (nosso caso: o
-     backend server/server.js publicado no Railway,
-     com PostgreSQL) → dados reais e compartilhados
-     entre todos os dispositivos.
+   O site é servido pelo próprio backend (Railway):
+   server/server.js entrega tanto os arquivos
+   estáticos quanto a API, sempre na mesma origem.
+   Por isso API_URL fica em "" — autodetecção via
+   GET /api/health na própria origem.
+
+   Só defina uma URL aqui se o site voltar a ser
+   publicado separado da API (ex.: GitHub Pages,
+   Vercel) — nesse caso, sem API_URL apontando para
+   o backend os portais caem no modo demonstração
+   (dados salvos apenas no navegador).
    ═══════════════════════════════════════════════ */
 
 window.VF_CONFIG = {
-  API_URL: "https://api-production-303c6.up.railway.app",
+  API_URL: "",
 };
