@@ -749,7 +749,7 @@ h1 em, h2 em {
   display: block;
   font-family: var(--font-display);
   font-style: italic;
-  font-size: 6rem;
+  font-size: 4.2rem;
   line-height: 0.6;
   color: var(--wine);
   opacity: 0.35;
@@ -760,7 +760,7 @@ h1 em, h2 em {
   font-family: var(--font-display);
   font-style: italic;
   font-weight: 300;
-  font-size: clamp(1.6rem, 3.4vw, 2.6rem);
+  font-size: clamp(1.12rem, 2.38vw, 1.82rem);
   line-height: 1.35;
   color: var(--wine-deep);
   max-width: 24ch;
