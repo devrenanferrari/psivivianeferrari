@@ -88,6 +88,17 @@
     </div>
   </main>
 
+  <!-- ══════════ CONFIRME SEU E-MAIL ══════════ -->
+  <main class="auth-wrap" id="verifyView" hidden>
+    <div class="auth-card">
+      <div class="auth-seal">✉</div>
+      <h1>Confirme seu e-mail</h1>
+      <p>Enviamos um link de confirmação para <strong id="verifyEmail"></strong>. Abra sua caixa de entrada (e a de spam, por garantia) e clique no link para liberar o agendamento.</p>
+      <button type="button" class="btn btn-primary btn-block" id="resendBtn">Reenviar e-mail</button>
+      <p class="hint" id="resendHint">Verificamos automaticamente assim que você confirmar.</p>
+    </div>
+  </main>
+
   <!-- ══════════ APP ══════════ -->
   <main class="app container" id="appView" hidden>
     <div class="app-head">
@@ -543,17 +554,48 @@
     }
 
     /* ── Boot ── */
+    let verifyPoll = null;
+
     async function boot() {
       const me = await VFStore.me();
+      const precisaVerificar = me && me.emailVerificado === false;
+
       $("authView").hidden = Boolean(me);
-      $("appView").hidden = !me;
+      $("verifyView").hidden = !precisaVerificar;
+      $("appView").hidden = !me || precisaVerificar;
       $("logoutBtn").hidden = !me;
+
+      clearInterval(verifyPoll);
+      if (precisaVerificar) {
+        $("verifyEmail").textContent = me.email;
+        // confirma sozinho, sem precisar recarregar, assim que o link for clicado em outra aba
+        verifyPoll = setInterval(async () => {
+          const fresh = await VFStore.me();
+          if (fresh && fresh.emailVerificado) { clearInterval(verifyPoll); await boot(); }
+        }, 5000);
+        return;
+      }
       if (!me) return;
       $("patientName").textContent = me.nome.split(" ")[0];
       $("waFallback").href = `https://wa.me/${WHATSAPP}`;
       await refreshData();
       await renderDays();
     }
+
+    $("resendBtn").addEventListener("click", async () => {
+      const btn = $("resendBtn");
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      try {
+        await VFStore.resendVerification();
+        toast("E-mail reenviado — confere sua caixa de entrada.");
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.classList.remove("is-loading");
+        btn.disabled = false;
+      }
+    });
 
     (async () => {
       const mode = await VFStore.init();

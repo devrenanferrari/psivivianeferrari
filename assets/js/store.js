@@ -69,6 +69,8 @@ const VFStore = (() => {
       const patient = {
         id: uid(), nome: nome.trim(), email, tel: tel.trim(),
         senhaHash: await sha256(senha), criadoEm: new Date().toISOString(),
+        // modo demonstração não manda e-mail de verdade — não faz sentido travar aqui
+        emailVerificado: true,
       };
       list.push(patient);
       lwrite("patients", list);
@@ -92,6 +94,8 @@ const VFStore = (() => {
       return session ? lread("patients", []).find((p) => p.id === session.patientId) || null : null;
     },
 
+    async resendVerification() { /* nada a fazer no modo demonstração */ },
+
     async adminConfigured() { return Boolean(lread("adminPass", null)); },
     async adminSetup(senha) {
       if (senha.length < 6) throw new Error("Use uma senha com pelo menos 6 caracteres.");
@@ -108,9 +112,19 @@ const VFStore = (() => {
     async availability() { return lread("availability", DEFAULT_AVAILABILITY); },
     async setAvailability(map) { lwrite("availability", map); },
 
+    async availabilityExceptions() { return lread("exceptions", []); },
+    async setAvailabilityException(data, hours) {
+      const list = lread("exceptions", []).filter((e) => e.data !== data);
+      list.push({ data, hours });
+      lwrite("exceptions", list);
+    },
+    async removeAvailabilityException(data) {
+      lwrite("exceptions", lread("exceptions", []).filter((e) => e.data !== data));
+    },
+
     async slotsFor(dateStr) {
-      const weekday = new Date(dateStr + "T12:00:00").getDay();
-      const base = (await this.availability())[weekday] || [];
+      const exc = lread("exceptions", []).find((e) => e.data === dateStr);
+      const base = exc ? exc.hours : (await this.availability())[new Date(dateStr + "T12:00:00").getDay()] || [];
       const taken = lread("appointments", [])
         .filter((a) => a.data === dateStr && a.status !== "cancelada")
         .map((a) => a.hora);
@@ -185,7 +199,38 @@ const VFStore = (() => {
     async patientsList() {
       return lread("patients", []).map((p) => ({ id: p.id, nome: p.nome, email: p.email, tel: p.tel }));
     },
+
+    async updatePatient(id, data) {
+      const list = lread("patients", []);
+      const patient = list.find((p) => p.id === id);
+      if (!patient) throw new Error("Paciente não encontrado.");
+      if (list.some((p) => p.id !== id && p.email === data.email)) throw new Error("Já existe outro paciente com este e-mail.");
+      Object.assign(patient, { nome: data.nome, email: data.email, tel: data.tel });
+      lwrite("patients", list);
+      return { id: patient.id, nome: patient.nome, email: patient.email, tel: patient.tel };
+    },
+
+    async exportPatientsCsv() {
+      const rows = [["Nome", "E-mail", "WhatsApp", "Cadastro"]];
+      lread("patients", []).forEach((p) => rows.push([p.nome, p.email, p.tel, new Date(p.criadoEm).toLocaleDateString("pt-BR")]));
+      return csvBlob(rows);
+    },
+    async exportAppointmentsCsv() {
+      const patients = lread("patients", []);
+      const rows = [["Data", "Horário", "Status", "Paciente", "E-mail", "WhatsApp"]];
+      lread("appointments", []).forEach((a) => {
+        const p = patients.find((x) => x.id === a.patientId);
+        rows.push([a.data, a.hora, a.status, p ? p.nome : "", p ? p.email : "", p ? p.tel : ""]);
+      });
+      return csvBlob(rows);
+    },
   };
+
+  function csvBlob(rows) {
+    const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const body = "﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+    return new Blob([body], { type: "text/csv;charset=utf-8" });
+  }
 
   /* ══════════ ADAPTADOR API ══════════ */
 
@@ -229,6 +274,7 @@ const VFStore = (() => {
       if (!lread("ptoken", null)) return null;
       try { return await call("/api/me"); } catch { return null; }
     },
+    async resendVerification() { return call("/api/resend-verification", { method: "POST" }); },
 
     async adminConfigured() { return (await call("/api/admin/status")).configured; },
     async adminSetup(senha) {
@@ -247,6 +293,13 @@ const VFStore = (() => {
 
     async availability() { return call("/api/availability"); },
     async setAvailability(map) { return call("/api/availability", { method: "PUT", body: { availability: map }, admin: true }); },
+    async availabilityExceptions() { return call("/api/availability/exceptions"); },
+    async setAvailabilityException(data, hours) {
+      return call("/api/availability/exceptions", { method: "PUT", body: { data, hours }, admin: true });
+    },
+    async removeAvailabilityException(data) {
+      return call("/api/availability/exceptions/" + data, { method: "DELETE", admin: true });
+    },
     async slotsFor(date) { return call("/api/slots?date=" + date); },
 
     async myAppointments() { return call("/api/appointments"); },
@@ -265,7 +318,18 @@ const VFStore = (() => {
     async markReadFor(patientId) { return call("/api/messages/read", { method: "POST", body: { patientId }, admin: true }); },
 
     async patientsList() { return call("/api/patients", { admin: true }); },
+    async updatePatient(id, data) { return call("/api/patients/" + id, { method: "PATCH", body: data, admin: true }); },
+
+    async exportPatientsCsv() { return fetchCsv("/api/export/patients"); },
+    async exportAppointmentsCsv() { return fetchCsv("/api/export/appointments"); },
   };
+
+  async function fetchCsv(pathname) {
+    const token = lread("atoken", null);
+    const response = await fetch(apiBase + pathname, { headers: token ? { Authorization: "Bearer " + token } : {} });
+    if (!response.ok) throw new Error("Não foi possível exportar. Faça login novamente.");
+    return response.blob();
+  }
 
   /* ══════════ FACHADA ══════════ */
 
@@ -296,13 +360,13 @@ const VFStore = (() => {
 
   // Delega cada método ao backend ativo no momento da chamada
   [
-    "signup", "login", "logout", "me",
+    "signup", "login", "logout", "me", "resendVerification",
     "adminConfigured", "adminSetup", "adminLogin", "adminLogged", "adminLogout",
-    "availability", "setAvailability", "slotsFor",
+    "availability", "setAvailability", "availabilityExceptions", "setAvailabilityException", "removeAvailabilityException", "slotsFor",
     "myAppointments", "allAppointments", "book", "setStatus",
     "myThread", "sendMyMessage", "markMyRead",
     "allMessages", "sendTo", "markReadFor",
-    "patientsList",
+    "patientsList", "updatePatient", "exportPatientsCsv", "exportAppointmentsCsv",
   ].forEach((name) => {
     facade[name] = (...args) => backend[name].apply(backend, args);
   });

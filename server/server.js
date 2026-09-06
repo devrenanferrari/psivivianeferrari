@@ -279,6 +279,16 @@ async function handleApi(req, res, url) {
     return res.end();
   }
 
+  if (p === "/api/resend-verification" && method === "POST") {
+    const me = await patientFromReq(req);
+    if (!me) return json(res, 401, { error: "Sessão expirada." });
+    if (me.email_verificado) return json(res, 200, { ok: true });
+    const verifyToken = newToken();
+    await pool.query("UPDATE patients SET verify_token = $1 WHERE id = $2", [verifyToken, me.id]);
+    await mailer.notifyEmailVerification({ patient: rowPatient(me), verifyUrl: `${SITE_URL}/api/verify-email?token=${verifyToken}` });
+    return json(res, 200, { ok: true });
+  }
+
   if (p === "/api/login" && method === "POST") {
     const b = await readBody(req);
     const { rows } = await pool.query("SELECT * FROM patients WHERE email = $1", [String(b.email || "").trim().toLowerCase()]);
