@@ -15,11 +15,13 @@
    ═══════════════════════════════════════════════ */
 
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 
-// O Railway não tem rota IPv6 de saída, mas o DNS do smtp.gmail.com retorna
-// endereço IPv6 — sem isso o Node tenta conectar por IPv6 primeiro e cai em
-// ENETUNREACH. Node 18+ tem essa opção pronta pra forçar IPv4 primeiro.
-try { require("dns").setDefaultResultOrder("ipv4first"); } catch { /* Node < 18 */ }
+// O Railway não tem rota IPv6 de saída, e nem setDefaultResultOrder nem
+// family:4 bastaram pra evitar o Node escolher o registro AAAA do Gmail
+// (ENETUNREACH). Solução definitiva: resolver o A (IPv4) da mão e conectar
+// direto nesse IP — sem ambiguidade nenhuma sobre qual família é usada.
+try { dns.setDefaultResultOrder("ipv4first"); } catch { /* Node < 18 */ }
 
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
@@ -27,35 +29,55 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL || GMAIL_USER;
 const FROM_NAME = process.env.MAIL_FROM_NAME || "Viviane Ferrari — Psicóloga";
 const SITE_URL = process.env.SITE_URL || "https://www.psivivianeferrari.com.br";
 
-const transporter =
-  GMAIL_USER && GMAIL_APP_PASSWORD
-    ? nodemailer.createTransport({
-        service: "gmail",
-        auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-        // falha rápido (padrão é ~2min) pra deixar as 3 tentativas do sendMail
-        // com um tempo total razoável em vez de travar minutos por instabilidade
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
-        family: 4,
-      })
-    : null;
-
-if (!transporter) {
+const configured = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
+if (!configured) {
   console.warn("[mailer] GMAIL_USER/GMAIL_APP_PASSWORD não configurados — e-mails serão apenas registrados no log.");
+}
+
+let gmailIp = null;
+async function resolveGmailIp() {
+  if (gmailIp) return gmailIp;
+  try {
+    const addrs = await dns.promises.resolve4("smtp.gmail.com");
+    gmailIp = addrs[0];
+  } catch (err) {
+    console.warn("[mailer] não consegui resolver IPv4 do smtp.gmail.com, usando o hostname mesmo:", err.message);
+    gmailIp = "smtp.gmail.com";
+  }
+  return gmailIp;
+}
+
+async function buildTransporter() {
+  const host = await resolveGmailIp();
+  return nodemailer.createTransport({
+    host,
+    port: 465,
+    secure: true,
+    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    // conectando por IP, o TLS precisa saber o hostname real pra validar o certificado
+    tls: { servername: "smtp.gmail.com" },
+    // falha rápido (padrão é ~2min) pra deixar as 3 tentativas do sendMail
+    // com um tempo total razoável em vez de travar minutos por instabilidade
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    family: 4,
+  });
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function sendMail({ to, subject, html }, attempt = 1) {
   if (!to) return;
-  if (!transporter) {
+  if (!configured) {
     console.warn(`[mailer] envio pulado (não configurado): "${subject}" para ${to}`);
     return;
   }
   try {
+    const transporter = await buildTransporter();
     await transporter.sendMail({ from: `"${FROM_NAME}" <${GMAIL_USER}>`, to, subject, html });
   } catch (err) {
+    gmailIp = null; // pode ter sido um IP ruim/trocado — resolve de novo na próxima tentativa
     // instabilidade de rede pontual entre o servidor e o Gmail — vale tentar de novo
     if (attempt < 3) {
       console.warn(`[mailer] tentativa ${attempt} falhou para ${to} (${err.message}) — tentando de novo…`);
