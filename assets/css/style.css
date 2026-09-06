@@ -37,6 +37,9 @@
 
 html { scroll-behavior: smooth; }
 
+html.menu-open,
+html.menu-open body { overflow: hidden; height: 100%; }
+
 body {
   font-family: var(--font-body);
   font-weight: 300;
@@ -289,6 +292,16 @@ h1 em, h2 em {
 
 .main-nav a:hover { opacity: 1; }
 .main-nav a:hover::after { transform: scaleX(1); }
+
+.nav-account {
+  opacity: 1 !important;
+  padding: 0.5rem 1.1rem;
+  border: 1px solid rgba(255, 237, 218, 0.4);
+  border-radius: 999px;
+  transition: border-color 0.3s, background 0.3s;
+}
+.nav-account::after { display: none; }
+.nav-account:hover { border-color: var(--cream); background: rgba(255, 237, 218, 0.08); }
 
 .header-actions { display: flex; align-items: center; gap: 1rem; }
 
@@ -821,7 +834,7 @@ h1 em, h2 em {
 .path-card-alt .path-cta { color: var(--wine); }
 
 .wizard {
-  max-width: 720px;
+  max-width: 860px;
   margin-inline: auto;
   background: #fff;
   border: 1px solid rgba(156, 121, 97, 0.2);
@@ -1244,6 +1257,12 @@ html.js .reveal.is-visible { opacity: 1; transform: translateY(0); }
   .footer-grid { grid-template-columns: 1fr 1fr; }
 }
 
+/* respiro extra entre os cartões de agendamento e o formulário no desktop */
+@media (min-width: 761px) {
+  .booking-paths { margin-bottom: 3.6rem; }
+  .wizard { margin-top: 0.5rem; }
+}
+
 @media (max-width: 760px) {
   .section { padding: 5rem 0; }
 
@@ -1288,7 +1307,7 @@ html.js .reveal.is-visible { opacity: 1; transform: translateY(0); }
 @media (max-width: 900px) {
   .hero { padding-top: 7rem; }
   .hero-inner { grid-template-columns: 1fr; }
-  .hero-photo { justify-self: center; width: min(90vw, 420px); }
+  .hero-photo { justify-self: center; width: min(90vw, 420px); order: -1; margin-bottom: 2.2rem; }
   .hero-photo::after { transform: translate(-14px, -14px); }
   .hero-seal { left: -10px; bottom: 30px; width: 66px; height: 66px; font-size: 1.25rem; }
 

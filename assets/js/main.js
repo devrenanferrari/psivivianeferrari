@@ -11,7 +11,10 @@ const WHATSAPP_NUMBER = "5532984146528";
 
 /* ── Header: fundo sólido ao rolar ─────────── */
 const header = document.querySelector(".site-header");
-const onScroll = () => header.classList.toggle("is-scrolled", window.scrollY > 40);
+let menuOpen = false;
+const onScroll = () => {
+  if (!menuOpen) header.classList.toggle("is-scrolled", window.scrollY > 40);
+};
 onScroll();
 window.addEventListener("scroll", onScroll, { passive: true });
 
@@ -19,17 +22,22 @@ window.addEventListener("scroll", onScroll, { passive: true });
 const navToggle = document.getElementById("navToggle");
 const mainNav = document.getElementById("mainNav");
 
-navToggle.addEventListener("click", () => {
-  const open = mainNav.classList.toggle("is-open");
+// Com o menu aberto: trava o scroll da página por trás e mantém o cabeçalho
+// sempre sólido (antes só ficava sólido se já estivesse rolado, o que deixava
+// o menu "vazando" o hero por trás quando aberto no topo da página).
+function setMenuOpen(open) {
+  menuOpen = open;
+  mainNav.classList.toggle("is-open", open);
   navToggle.setAttribute("aria-expanded", String(open));
   navToggle.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
-});
+  document.documentElement.classList.toggle("menu-open", open);
+  header.classList.toggle("is-scrolled", open || window.scrollY > 40);
+}
+
+navToggle.addEventListener("click", () => setMenuOpen(!menuOpen));
 
 mainNav.querySelectorAll("a").forEach((link) =>
-  link.addEventListener("click", () => {
-    mainNav.classList.remove("is-open");
-    navToggle.setAttribute("aria-expanded", "false");
-  })
+  link.addEventListener("click", () => setMenuOpen(false))
 );
 
 /* ── Reveal on scroll ───────────────────────── */
