@@ -73,7 +73,8 @@ Projeto **psivivianeferrari** no Railway (workspace "bytepay pagamentos"), com d
 
 - **Postgres** — banco de dados (rede privada, `DATABASE_URL` interno).
 - **api** — este servidor (`server/server.js`), com `DATABASE_URL=${{Postgres.DATABASE_URL}}` configurado. Domínios:
-  - `https://psivivianeferrari.com.br` — domínio próprio (DNS: CNAME `@` → `689abuaq.up.railway.app` + TXT `_railway-verify`, configurados no provedor de DNS do domínio).
+  - `https://www.psivivianeferrari.com.br` — domínio próprio, **verificado e com HTTPS ativo** (DNS na Hostinger: CNAME `www` → `qa4zs08b.up.railway.app` + TXT `_railway-verify.www`).
+  - `https://psivivianeferrari.com.br` (raiz, sem `www`) — o Railway não aceita registro A/raiz apontando pra ele (não publica IP fixo), então a raiz depende de um **redirecionamento HTTP** configurado na Hostinger para `https://www.psivivianeferrari.com.br` (pendente — ver abaixo). Também existe uma tentativa antiga de domínio raiz criada no Railway (`psivivianeferrari.com.br` sem `www`) que nunca verificou — pode ser removida com `railway domain remove` se o redirecionamento na Hostinger for o caminho definitivo.
   - `https://api-production-303c6.up.railway.app` — domínio gerado pelo Railway, continua ativo como URL alternativa.
 
 Para reimplantar depois de alterar o backend:
@@ -84,7 +85,9 @@ railway up --service api
 
 (rode a partir da raiz do repositório, com o Railway CLI logado — `railway login` — e o projeto linkado — `railway status` confirma).
 
-**Pendente:** acessar `/admin` no domínio publicado e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
+**Pendentes:**
+- Configurar o redirecionamento `psivivianeferrari.com.br` → `https://www.psivivianeferrari.com.br` no painel da Hostinger.
+- Acessar `/admin` em `https://www.psivivianeferrari.com.br/admin/` e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
 
 ### Para recriar o deploy do zero (referência)
 
