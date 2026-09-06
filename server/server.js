@@ -2,27 +2,45 @@
 /* ═══════════════════════════════════════════════
    Servidor VF · site estático + API de agendamento
    ───────────────────────────────────────────────
-   Sem dependências externas — roda com Node 18+:
+   Roda com Node 18+ e persiste em PostgreSQL:
 
-     node server/server.js
+     DATABASE_URL=postgres://...  node server/server.js
 
    Serve o site na raiz e a API em /api/*. Os
    portais (/conta e /admin) detectam a API
    automaticamente e passam a operar com dados
    compartilhados entre todos os dispositivos.
 
-   Dados persistidos em server/data.json
-   (configurável via VF_DATA_FILE).
+   Variáveis de ambiente:
+   - DATABASE_URL  · obrigatória (Postgres)
+   - PORT          · porta HTTP (padrão 8787; o Railway define a sua)
+   - VF_TIMEZONE   · fuso usado para "hoje" (padrão America/Sao_Paulo)
    ═══════════════════════════════════════════════ */
 
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { Pool, types } = require("pg");
+
+// Coluna DATE deve voltar como "AAAA-MM-DD" (string), não como Date/UTC —
+// o front-end compara datas com operadores de string (>=, <=, ===).
+types.setTypeParser(1082, (val) => val);
 
 const PORT = process.env.PORT || 8787;
 const ROOT = path.join(__dirname, "..");
-const DATA_FILE = process.env.VF_DATA_FILE || path.join(__dirname, "data.json");
+const TIMEZONE = process.env.VF_TIMEZONE || "America/Sao_Paulo";
+
+if (!process.env.DATABASE_URL) {
+  console.error("Faltando DATABASE_URL. Configure a conexão com o Postgres antes de iniciar.");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false },
+});
+pool.on("error", (err) => console.error("Erro inesperado no pool do Postgres:", err));
 
 const DEFAULT_AVAILABILITY = {
   1: ["09:00", "10:00", "11:00", "14:00", "15:00", "19:00", "20:00"],
@@ -32,28 +50,71 @@ const DEFAULT_AVAILABILITY = {
   5: ["09:00", "10:00", "11:00", "14:00", "15:00"],
 };
 
-/* ── Banco de dados (arquivo JSON) ──────────── */
+/* ── Schema ─────────────────────────────────── */
 
-let db;
-function load() {
-  try {
-    db = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch {
-    db = null;
+async function ensureSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS patients (
+      id TEXT PRIMARY KEY,
+      nome TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      tel TEXT NOT NULL DEFAULT '',
+      salt TEXT NOT NULL,
+      senha_hash TEXT NOT NULL,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_config (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      salt TEXT NOT NULL,
+      hash TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS availability (
+      weekday INTEGER PRIMARY KEY CHECK (weekday BETWEEN 0 AND 6),
+      hours JSONB NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS appointments (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      data DATE NOT NULL,
+      hora TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pendente',
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS appointments_active_slot
+      ON appointments (data, hora) WHERE status <> 'cancelada';
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      de TEXT NOT NULL,
+      texto TEXT NOT NULL,
+      em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      lida BOOLEAN NOT NULL DEFAULT false
+    );
+
+    CREATE TABLE IF NOT EXISTS patient_tokens (
+      token TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_tokens (
+      token TEXT PRIMARY KEY,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM availability");
+  if (rows[0].n === 0) {
+    for (const [weekday, hours] of Object.entries(DEFAULT_AVAILABILITY)) {
+      await pool.query("INSERT INTO availability (weekday, hours) VALUES ($1, $2)", [Number(weekday), JSON.stringify(hours)]);
+    }
   }
-  db = Object.assign(
-    { adminPass: null, patients: [], appointments: [], messages: [], availability: DEFAULT_AVAILABILITY, ptokens: {}, atokens: {} },
-    db || {}
-  );
 }
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 1));
-  }, 40);
-}
-load();
 
 /* ── Utilidades ─────────────────────────────── */
 
@@ -61,17 +122,18 @@ const uid = () => Date.now().toString(36) + crypto.randomBytes(4).toString("hex"
 const newToken = () => crypto.randomBytes(24).toString("hex");
 const hashPass = (senha, salt) => crypto.scryptSync(String(senha), salt, 48).toString("hex");
 
-const publicPatient = (p) => p && { id: p.id, nome: p.nome, email: p.email, tel: p.tel, criadoEm: p.criadoEm };
+const todayStr = () => new Date().toLocaleDateString("sv-SE", { timeZone: TIMEZONE });
 
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+const rowPatient = (r) => r && { id: r.id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.criado_em };
+const rowAppointment = (r) => r && { id: r.id, patientId: r.patient_id, data: r.data, hora: r.hora, status: r.status, criadoEm: r.criado_em };
+const rowMessage = (r) => r && { id: r.id, patientId: r.patient_id, de: r.de, texto: r.texto, em: r.em, lida: r.lida };
 
-function slotsFor(dateStr) {
+async function slotsFor(dateStr) {
   const weekday = new Date(dateStr + "T12:00:00").getDay();
-  const base = db.availability[weekday] || [];
-  const taken = db.appointments.filter((a) => a.data === dateStr && a.status !== "cancelada").map((a) => a.hora);
+  const availRes = await pool.query("SELECT hours FROM availability WHERE weekday = $1", [weekday]);
+  const base = availRes.rows[0] ? availRes.rows[0].hours : [];
+  const takenRes = await pool.query("SELECT hora FROM appointments WHERE data = $1 AND status <> 'cancelada'", [dateStr]);
+  const taken = takenRes.rows.map((r) => r.hora);
   return base.filter((h) => !taken.includes(h));
 }
 
@@ -108,15 +170,23 @@ function bearer(req) {
   const h = req.headers.authorization || "";
   return h.startsWith("Bearer ") ? h.slice(7) : null;
 }
-const patientFromReq = (req) => {
+
+async function patientFromReq(req) {
   const t = bearer(req);
-  const id = t && db.ptokens[t];
-  return id ? db.patients.find((p) => p.id === id) || null : null;
-};
-const isAdmin = (req) => {
+  if (!t) return null;
+  const { rows } = await pool.query(
+    `SELECT p.* FROM patient_tokens t JOIN patients p ON p.id = t.patient_id WHERE t.token = $1`,
+    [t]
+  );
+  return rows[0] || null;
+}
+
+async function isAdminReq(req) {
   const t = bearer(req);
-  return Boolean(t && db.atokens[t]);
-};
+  if (!t) return false;
+  const { rows } = await pool.query("SELECT 1 FROM admin_tokens WHERE token = $1", [t]);
+  return rows.length > 0;
+}
 
 /* ── API ────────────────────────────────────── */
 
@@ -133,73 +203,82 @@ async function handleApi(req, res, url) {
     if (!String(b.nome || "").trim() || !email || String(b.senha || "").length < 6) {
       return json(res, 400, { error: "Preencha nome, e-mail e uma senha com pelo menos 6 caracteres." });
     }
-    if (db.patients.some((x) => x.email === email)) {
-      return json(res, 409, { error: "Já existe uma conta com este e-mail." });
-    }
+    const exists = await pool.query("SELECT 1 FROM patients WHERE email = $1", [email]);
+    if (exists.rows.length) return json(res, 409, { error: "Já existe uma conta com este e-mail." });
+
+    const id = uid();
     const salt = crypto.randomBytes(12).toString("hex");
-    const patient = {
-      id: uid(), nome: String(b.nome).trim(), email, tel: String(b.tel || "").trim(),
-      salt, senhaHash: hashPass(b.senha, salt), criadoEm: new Date().toISOString(),
-    };
-    db.patients.push(patient);
+    await pool.query(
+      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash) VALUES ($1, $2, $3, $4, $5, $6)",
+      [id, String(b.nome).trim(), email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt)]
+    );
     const t = newToken();
-    db.ptokens[t] = patient.id;
-    save();
-    return json(res, 200, { token: t, patient: publicPatient(patient) });
+    await pool.query("INSERT INTO patient_tokens (token, patient_id) VALUES ($1, $2)", [t, id]);
+    const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [id]);
+    return json(res, 200, { token: t, patient: rowPatient(rows[0]) });
   }
 
   if (p === "/api/login" && method === "POST") {
     const b = await readBody(req);
-    const patient = db.patients.find((x) => x.email === String(b.email || "").trim().toLowerCase());
-    if (!patient || patient.senhaHash !== hashPass(b.senha || "", patient.salt)) {
+    const { rows } = await pool.query("SELECT * FROM patients WHERE email = $1", [String(b.email || "").trim().toLowerCase()]);
+    const patient = rows[0];
+    if (!patient || patient.senha_hash !== hashPass(b.senha || "", patient.salt)) {
       return json(res, 401, { error: "E-mail ou senha incorretos." });
     }
     const t = newToken();
-    db.ptokens[t] = patient.id;
-    save();
-    return json(res, 200, { token: t, patient: publicPatient(patient) });
+    await pool.query("INSERT INTO patient_tokens (token, patient_id) VALUES ($1, $2)", [t, patient.id]);
+    return json(res, 200, { token: t, patient: rowPatient(patient) });
   }
 
   if (p === "/api/me" && method === "GET") {
-    const me = patientFromReq(req);
-    return me ? json(res, 200, publicPatient(me)) : json(res, 401, { error: "Sessão expirada." });
+    const me = await patientFromReq(req);
+    return me ? json(res, 200, rowPatient(me)) : json(res, 401, { error: "Sessão expirada." });
   }
 
   /* — admin — */
-  if (p === "/api/admin/status" && method === "GET") return json(res, 200, { configured: Boolean(db.adminPass) });
+  if (p === "/api/admin/status" && method === "GET") {
+    const { rows } = await pool.query("SELECT 1 FROM admin_config WHERE id = 1");
+    return json(res, 200, { configured: rows.length > 0 });
+  }
 
   if (p === "/api/admin/setup" && method === "POST") {
-    if (db.adminPass) return json(res, 409, { error: "O painel já tem senha. Use o login." });
+    const already = await pool.query("SELECT 1 FROM admin_config WHERE id = 1");
+    if (already.rows.length) return json(res, 409, { error: "O painel já tem senha. Use o login." });
     const b = await readBody(req);
     if (String(b.senha || "").length < 6) return json(res, 400, { error: "Use uma senha com pelo menos 6 caracteres." });
     const salt = crypto.randomBytes(12).toString("hex");
-    db.adminPass = { salt, hash: hashPass(b.senha, salt) };
+    await pool.query("INSERT INTO admin_config (id, salt, hash) VALUES (1, $1, $2)", [salt, hashPass(b.senha, salt)]);
     const t = newToken();
-    db.atokens[t] = true;
-    save();
+    await pool.query("INSERT INTO admin_tokens (token) VALUES ($1)", [t]);
     return json(res, 200, { token: t });
   }
 
   if (p === "/api/admin/login" && method === "POST") {
     const b = await readBody(req);
-    if (!db.adminPass || db.adminPass.hash !== hashPass(b.senha || "", db.adminPass.salt)) {
+    const { rows } = await pool.query("SELECT * FROM admin_config WHERE id = 1");
+    const cfg = rows[0];
+    if (!cfg || cfg.hash !== hashPass(b.senha || "", cfg.salt)) {
       return json(res, 401, { error: "Senha incorreta." });
     }
     const t = newToken();
-    db.atokens[t] = true;
-    save();
+    await pool.query("INSERT INTO admin_tokens (token) VALUES ($1)", [t]);
     return json(res, 200, { token: t });
   }
 
   if (p === "/api/admin/me" && method === "GET") {
-    return isAdmin(req) ? json(res, 200, { ok: true }) : json(res, 401, { error: "Sessão expirada." });
+    return (await isAdminReq(req)) ? json(res, 200, { ok: true }) : json(res, 401, { error: "Sessão expirada." });
   }
 
   /* — disponibilidade — */
-  if (p === "/api/availability" && method === "GET") return json(res, 200, db.availability);
+  if (p === "/api/availability" && method === "GET") {
+    const { rows } = await pool.query("SELECT weekday, hours FROM availability");
+    const map = {};
+    rows.forEach((r) => { map[r.weekday] = r.hours; });
+    return json(res, 200, map);
+  }
 
   if (p === "/api/availability" && method === "PUT") {
-    if (!isAdmin(req)) return json(res, 401, { error: "Acesso restrito." });
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
     const b = await readBody(req);
     const map = {};
     for (const [day, hours] of Object.entries(b.availability || {})) {
@@ -209,109 +288,143 @@ async function handleApi(req, res, url) {
         if (clean.length) map[d] = clean;
       }
     }
-    db.availability = map;
-    save();
-    return json(res, 200, db.availability);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM availability");
+      for (const [day, hours] of Object.entries(map)) {
+        await client.query("INSERT INTO availability (weekday, hours) VALUES ($1, $2)", [Number(day), JSON.stringify(hours)]);
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+    return json(res, 200, map);
   }
 
   if (p === "/api/slots" && method === "GET") {
     const date = url.searchParams.get("date") || "";
     if (!DATE_RE.test(date)) return json(res, 400, { error: "Data inválida." });
-    return json(res, 200, slotsFor(date));
+    return json(res, 200, await slotsFor(date));
   }
 
   /* — agendamentos — */
   if (p === "/api/appointments" && method === "GET") {
-    if (isAdmin(req)) {
-      return json(res, 200, db.appointments.map((a) => ({
-        ...a,
-        patient: publicPatient(db.patients.find((x) => x.id === a.patientId)) || null,
+    if (await isAdminReq(req)) {
+      const { rows } = await pool.query(`
+        SELECT a.*, p.id AS p_id, p.nome AS p_nome, p.email AS p_email, p.tel AS p_tel, p.criado_em AS p_criado_em
+        FROM appointments a LEFT JOIN patients p ON p.id = a.patient_id
+        ORDER BY a.data, a.hora
+      `);
+      return json(res, 200, rows.map((r) => ({
+        ...rowAppointment(r),
+        patient: r.p_id ? { id: r.p_id, nome: r.p_nome, email: r.p_email, tel: r.p_tel, criadoEm: r.p_criado_em } : null,
       })));
     }
-    const me = patientFromReq(req);
+    const me = await patientFromReq(req);
     if (!me) return json(res, 401, { error: "Sessão expirada." });
-    return json(res, 200, db.appointments.filter((a) => a.patientId === me.id));
+    const { rows } = await pool.query("SELECT * FROM appointments WHERE patient_id = $1 ORDER BY data, hora", [me.id]);
+    return json(res, 200, rows.map(rowAppointment));
   }
 
   if (p === "/api/appointments" && method === "POST") {
-    const me = patientFromReq(req);
+    const me = await patientFromReq(req);
     if (!me) return json(res, 401, { error: "Sessão expirada." });
     const b = await readBody(req);
     if (!DATE_RE.test(b.data || "") || !TIME_RE.test(b.hora || "") || b.data < todayStr()) {
       return json(res, 400, { error: "Data ou horário inválidos." });
     }
-    if (!slotsFor(b.data).includes(b.hora)) {
+    if (!(await slotsFor(b.data)).includes(b.hora)) {
       return json(res, 409, { error: "Este horário acabou de ser ocupado. Escolha outro, por favor." });
     }
-    const appointment = { id: uid(), patientId: me.id, data: b.data, hora: b.hora, status: "pendente", criadoEm: new Date().toISOString() };
-    db.appointments.push(appointment);
-    save();
-    return json(res, 200, appointment);
+    const appointment = { id: uid(), patientId: me.id, data: b.data, hora: b.hora, status: "pendente" };
+    try {
+      const { rows } = await pool.query(
+        "INSERT INTO appointments (id, patient_id, data, hora, status) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        [appointment.id, appointment.patientId, appointment.data, appointment.hora, appointment.status]
+      );
+      return json(res, 200, rowAppointment(rows[0]));
+    } catch (err) {
+      if (err.code === "23505") return json(res, 409, { error: "Este horário acabou de ser ocupado. Escolha outro, por favor." });
+      throw err;
+    }
   }
 
   const apptMatch = p.match(/^\/api\/appointments\/([\w]+)$/);
   if (apptMatch && method === "PATCH") {
-    const appointment = db.appointments.find((a) => a.id === apptMatch[1]);
+    const { rows: found } = await pool.query("SELECT * FROM appointments WHERE id = $1", [apptMatch[1]]);
+    const appointment = found[0];
     if (!appointment) return json(res, 404, { error: "Sessão não encontrada." });
     const b = await readBody(req);
     const status = String(b.status || "");
-    if (isAdmin(req)) {
+
+    if (await isAdminReq(req)) {
       if (!["pendente", "confirmada", "cancelada"].includes(status)) return json(res, 400, { error: "Status inválido." });
-      appointment.status = status;
-      save();
-      return json(res, 200, appointment);
+      const { rows } = await pool.query("UPDATE appointments SET status = $1 WHERE id = $2 RETURNING *", [status, appointment.id]);
+      return json(res, 200, rowAppointment(rows[0]));
     }
-    const me = patientFromReq(req);
-    if (!me || appointment.patientId !== me.id) return json(res, 401, { error: "Acesso negado." });
+    const me = await patientFromReq(req);
+    if (!me || appointment.patient_id !== me.id) return json(res, 401, { error: "Acesso negado." });
     if (status !== "cancelada") return json(res, 400, { error: "Você pode apenas cancelar a sessão." });
-    appointment.status = "cancelada";
-    save();
-    return json(res, 200, appointment);
+    const { rows } = await pool.query("UPDATE appointments SET status = 'cancelada' WHERE id = $1 RETURNING *", [appointment.id]);
+    return json(res, 200, rowAppointment(rows[0]));
   }
 
   /* — mensagens — */
   if (p === "/api/messages" && method === "GET") {
-    if (isAdmin(req)) return json(res, 200, db.messages);
-    const me = patientFromReq(req);
+    if (await isAdminReq(req)) {
+      const { rows } = await pool.query("SELECT * FROM messages ORDER BY em");
+      return json(res, 200, rows.map(rowMessage));
+    }
+    const me = await patientFromReq(req);
     if (!me) return json(res, 401, { error: "Sessão expirada." });
-    return json(res, 200, db.messages.filter((m) => m.patientId === me.id));
+    const { rows } = await pool.query("SELECT * FROM messages WHERE patient_id = $1 ORDER BY em", [me.id]);
+    return json(res, 200, rows.map(rowMessage));
   }
 
   if (p === "/api/messages" && method === "POST") {
     const b = await readBody(req);
     const texto = String(b.texto || "").trim().slice(0, 2000);
     if (!texto) return json(res, 400, { error: "Mensagem vazia." });
-    let msg;
-    if (isAdmin(req)) {
-      if (!db.patients.some((x) => x.id === b.patientId)) return json(res, 400, { error: "Paciente inválido." });
-      msg = { id: uid(), patientId: b.patientId, de: "psicologa", texto, em: new Date().toISOString(), lida: false };
-    } else {
-      const me = patientFromReq(req);
-      if (!me) return json(res, 401, { error: "Sessão expirada." });
-      msg = { id: uid(), patientId: me.id, de: "paciente", texto, em: new Date().toISOString(), lida: false };
+
+    if (await isAdminReq(req)) {
+      const exists = await pool.query("SELECT 1 FROM patients WHERE id = $1", [b.patientId]);
+      if (!exists.rows.length) return json(res, 400, { error: "Paciente inválido." });
+      const { rows } = await pool.query(
+        "INSERT INTO messages (id, patient_id, de, texto) VALUES ($1, $2, 'psicologa', $3) RETURNING *",
+        [uid(), b.patientId, texto]
+      );
+      return json(res, 200, rowMessage(rows[0]));
     }
-    db.messages.push(msg);
-    save();
-    return json(res, 200, msg);
+    const me = await patientFromReq(req);
+    if (!me) return json(res, 401, { error: "Sessão expirada." });
+    const { rows } = await pool.query(
+      "INSERT INTO messages (id, patient_id, de, texto) VALUES ($1, $2, 'paciente', $3) RETURNING *",
+      [uid(), me.id, texto]
+    );
+    return json(res, 200, rowMessage(rows[0]));
   }
 
   if (p === "/api/messages/read" && method === "POST") {
     const b = await readBody(req);
-    if (isAdmin(req)) {
-      db.messages.forEach((m) => { if (m.patientId === b.patientId && m.de === "paciente") m.lida = true; });
+    if (await isAdminReq(req)) {
+      await pool.query("UPDATE messages SET lida = true WHERE patient_id = $1 AND de = 'paciente'", [b.patientId]);
     } else {
-      const me = patientFromReq(req);
+      const me = await patientFromReq(req);
       if (!me) return json(res, 401, { error: "Sessão expirada." });
-      db.messages.forEach((m) => { if (m.patientId === me.id && m.de === "psicologa") m.lida = true; });
+      await pool.query("UPDATE messages SET lida = true WHERE patient_id = $1 AND de = 'psicologa'", [me.id]);
     }
-    save();
     return json(res, 200, { ok: true });
   }
 
   /* — pacientes (admin) — */
   if (p === "/api/patients" && method === "GET") {
-    if (!isAdmin(req)) return json(res, 401, { error: "Acesso restrito." });
-    return json(res, 200, db.patients.map(publicPatient));
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const { rows } = await pool.query("SELECT * FROM patients ORDER BY nome");
+    return json(res, 200, rows.map(rowPatient));
   }
 
   return json(res, 404, { error: "Rota não encontrada." });
@@ -372,10 +485,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== "GET") { res.writeHead(405); return res.end(); }
     return serveStatic(req, res, url);
   } catch (err) {
+    console.error(err);
     return json(res, 500, { error: "Erro interno." });
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`VF no ar → http://localhost:${PORT}  (site + API; dados em ${DATA_FILE})`);
-});
+ensureSchema()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`VF no ar → http://localhost:${PORT}  (site + API; Postgres conectado)`);
+    });
+  })
+  .catch((err) => {
+    console.error("Não foi possível preparar o banco de dados:", err);
+    process.exit(1);
+  });

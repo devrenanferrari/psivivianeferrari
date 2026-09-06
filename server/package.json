@@ -1,7 +1,10 @@
 {
   "name": "psivivianeferrari-server",
   "private": true,
-  "description": "Site + API de agendamento da psicóloga VF (sem dependências)",
+  "description": "Site + API de agendamento da psicóloga VF (Node + PostgreSQL)",
   "engines": { "node": ">=18" },
-  "scripts": { "start": "node server.js" }
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
 }

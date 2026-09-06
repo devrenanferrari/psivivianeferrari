@@ -24,7 +24,11 @@ assets/css/style.css   Estilos da página pública
 assets/css/portal.css  Estilos compartilhados dos dois portais
 assets/js/main.js      Interações da página pública (menu, reveal, wizard WhatsApp)
 assets/js/store.js     VFStore — camada de dados dos portais
+assets/js/config.js    URL da API usada pelos portais (VF_CONFIG.API_URL)
 assets/img/            Fotos (vf-1 sofá · vf-2 vestido branco · vf-3 consultório)
+server/server.js       API + servidor estático (Node + PostgreSQL)
+nixpacks.toml          Build da API no Railway (instala server/ com npm ci)
+railway.toml           Deploy da API no Railway (start command, healthcheck)
 ```
 
 ## Sistema de agendamento — duas visões
@@ -48,9 +52,60 @@ O atendimento é 100% online. Na seção `#agendar` a pessoa escolhe o caminho:
 
 Se paciente e painel estiverem abertos ao mesmo tempo (abas diferentes), as telas se atualizam em tempo real via evento `storage`.
 
-### Arquitetura e limitação importante
+### Arquitetura
 
-Toda a lógica conversa apenas com o **`VFStore`** (`assets/js/store.js`), que hoje persiste em `localStorage` — ou seja, **os dados vivem no navegador de cada dispositivo**: o painel só enxerga agendamentos feitos no mesmo navegador. É a arquitetura certa para validar o produto sem custo; para produção real (dados compartilhados entre dispositivos), basta reimplementar as funções do `VFStore` sobre um backend (Supabase/Firebase resolvem em poucas horas mantendo as mesmas assinaturas) — nenhuma tela precisa mudar.
+Toda a lógica conversa apenas com o **`VFStore`** (`assets/js/store.js`), uma fachada única com dois modos:
+
+- **API** (`server/server.js` + PostgreSQL) — dados compartilhados entre todos os dispositivos. É o modo de produção, descrito em [Backend e deploy](#backend-e-deploy) abaixo.
+- **Local** (`localStorage`) — modo demonstração, usado automaticamente quando nenhuma API responde (ex.: abrindo o site sem backend configurado). Cada navegador enxerga só os próprios dados.
+
+`VFStore.init()` detecta o modo sozinho: tenta `GET {API_URL}/api/health` e, se responder, usa a API; senão cai no modo local. Nenhuma tela precisa saber qual dos dois está ativo.
+
+## Backend e deploy
+
+O backend (`server/`) é um servidor Node puro (só a dependência `pg`) que expõe a API em `/api/*` e persiste tudo em **PostgreSQL**. O site estático continua podendo ser publicado separadamente (GitHub Pages) — basta apontar o front-end para a URL da API.
+
+### 1. Banco de dados (Railway)
+
+No projeto Railway, adicione um plugin **PostgreSQL** (`+ New` → `Database` → `Add PostgreSQL`). O Railway cria a variável `DATABASE_URL` automaticamente.
+
+### 2. Serviço da API (Railway)
+
+1. `+ New` → `GitHub Repo` → selecione este repositório (ou `New Empty Service` + deploy via CLI).
+2. Em **Variables**, adicione uma referência à variável do Postgres: `DATABASE_URL` → `${{Postgres.DATABASE_URL}}` (o Railway sugere isso automaticamente ao linkar os dois serviços).
+3. O build usa `nixpacks.toml` (instala as dependências de `server/` com `npm ci`) e `railway.toml` (comando de start `node server/server.js`, healthcheck em `/api/health`). Nenhuma configuração manual adicional é necessária.
+4. Ao final do deploy, o Railway gera um domínio público (`Settings` → `Networking` → `Generate Domain`). Essa é a URL da API.
+
+O servidor cria as tabelas automaticamente na primeira execução (`ensureSchema()` em `server.js`) — não é preciso rodar migrations à parte.
+
+### 3. Conectar o site à API
+
+Em [`assets/js/config.js`](assets/js/config.js), defina:
+
+```js
+window.VF_CONFIG = {
+  API_URL: "https://SEU-SERVICO.up.railway.app",
+};
+```
+
+Publique essa alteração (GitHub Pages ou onde o site estiver hospedado) e os portais `/conta` e `/admin` passam a usar dados reais e compartilhados.
+
+### Rodando localmente
+
+```
+cd server
+npm install
+DATABASE_URL="postgres://usuario:senha@localhost:5432/vf" node server.js
+```
+
+Sem um Postgres à mão, use um container temporário:
+
+```
+docker run -d --name vf-pg -e POSTGRES_PASSWORD=vf -e POSTGRES_DB=vf -p 5432:5432 postgres:16-alpine
+DATABASE_URL="postgres://postgres:vf@localhost:5432/vf" node server/server.js
+```
+
+Com o servidor local rodando, abra `http://localhost:8787` — `config.js` com `API_URL: ""` já aponta para a própria origem.
 
 ## Antes de publicar
 
@@ -72,7 +127,6 @@ WhatsApp (`5532984146528`) e Instagram (`@psivivianeferrari`) já estão configu
 
 ## Evoluções sugeridas
 
-- Backend real para o VFStore (Supabase/Firebase) — dados compartilhados entre dispositivos e notificações.
 - Lembrete automático de sessão por WhatsApp/e-mail.
 - Adicionar blog/conteúdos para SEO ("terapia online funciona?", etc.).
 - Domínio próprio + Google Business Profile para busca local.

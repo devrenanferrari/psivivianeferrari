@@ -1,2 +1,2 @@
-server/data.json
 node_modules/
+server/.env
