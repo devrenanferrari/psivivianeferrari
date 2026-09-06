@@ -285,7 +285,7 @@ async function handleApi(req, res, url) {
     if (me.email_verificado) return json(res, 200, { ok: true });
     const verifyToken = newToken();
     await pool.query("UPDATE patients SET verify_token = $1 WHERE id = $2", [verifyToken, me.id]);
-    await mailer.notifyEmailVerification({ patient: rowPatient(me), verifyUrl: `${SITE_URL}/api/verify-email?token=${verifyToken}` });
+    mailer.notifyEmailVerification({ patient: rowPatient(me), verifyUrl: `${SITE_URL}/api/verify-email?token=${verifyToken}` }).catch((err) => console.error("[mailer]", err));
     return json(res, 200, { ok: true });
   }
 

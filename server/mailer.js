@@ -27,6 +27,11 @@ const transporter =
     ? nodemailer.createTransport({
         service: "gmail",
         auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+        // falha rápido (padrão é ~2min) pra deixar as 3 tentativas do sendMail
+        // com um tempo total razoável em vez de travar minutos por instabilidade
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
       })
     : null;
 
@@ -34,7 +39,9 @@ if (!transporter) {
   console.warn("[mailer] GMAIL_USER/GMAIL_APP_PASSWORD não configurados — e-mails serão apenas registrados no log.");
 }
 
-async function sendMail({ to, subject, html }) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function sendMail({ to, subject, html }, attempt = 1) {
   if (!to) return;
   if (!transporter) {
     console.warn(`[mailer] envio pulado (não configurado): "${subject}" para ${to}`);
@@ -43,7 +50,13 @@ async function sendMail({ to, subject, html }) {
   try {
     await transporter.sendMail({ from: `"${FROM_NAME}" <${GMAIL_USER}>`, to, subject, html });
   } catch (err) {
-    console.error(`[mailer] falha ao enviar "${subject}" para ${to}:`, err.message);
+    // instabilidade de rede pontual entre o servidor e o Gmail — vale tentar de novo
+    if (attempt < 3) {
+      console.warn(`[mailer] tentativa ${attempt} falhou para ${to} (${err.message}) — tentando de novo…`);
+      await sleep(2000 * attempt);
+      return sendMail({ to, subject, html }, attempt + 1);
+    }
+    console.error(`[mailer] falha ao enviar "${subject}" para ${to} após ${attempt} tentativas:`, err.message);
   }
 }
 
