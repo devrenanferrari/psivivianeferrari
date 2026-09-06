@@ -1,68 +1,33 @@
 /* ═══════════════════════════════════════════════
-   Mailer · avisos por e-mail (Gmail SMTP)
+   Mailer · avisos por e-mail (Resend, via HTTPS)
    ───────────────────────────────────────────────
    Variáveis de ambiente:
-   - GMAIL_USER          · endereço Gmail remetente
-   - GMAIL_APP_PASSWORD  · senha de app (não é a senha normal da conta)
-   - ADMIN_EMAIL         · e-mail da psicóloga p/ avisos de novas
-                           solicitações (padrão: o próprio GMAIL_USER)
-   - MAIL_FROM_NAME      · nome exibido no remetente (opcional)
-   - SITE_URL            · usado nos botões dos e-mails (padrão abaixo)
+   - RESEND_API_KEY   · chave da API do Resend (resend.com)
+   - MAIL_FROM        · endereço remetente (padrão: contato@psivivianeferrari.com.br,
+                        precisa ser um domínio verificado no Resend)
+   - ADMIN_EMAIL      · e-mail da psicóloga p/ avisos de novas solicitações
+                        (padrão: o próprio MAIL_FROM)
+   - MAIL_FROM_NAME   · nome exibido no remetente (opcional)
+   - SITE_URL         · usado nos botões dos e-mails (padrão abaixo)
 
-   Sem GMAIL_USER/GMAIL_APP_PASSWORD configurados, os envios são
-   silenciosamente ignorados (apenas um aviso no log) — o agendamento
-   continua funcionando normalmente sem e-mail.
+   Usamos a API HTTP do Resend (não SMTP) de propósito: plataformas como o
+   Railway costumam ter saída SMTP bloqueada/instável (foi exatamente o que
+   aconteceu tentando mandar direto pelo Gmail) — HTTPS não tem esse problema.
+
+   Sem RESEND_API_KEY configurada, os envios são silenciosamente ignorados
+   (apenas um aviso no log) — o agendamento continua funcionando normalmente
+   sem e-mail.
    ═══════════════════════════════════════════════ */
 
-const nodemailer = require("nodemailer");
-const dns = require("dns");
-
-// O Railway não tem rota IPv6 de saída, e nem setDefaultResultOrder nem
-// family:4 bastaram pra evitar o Node escolher o registro AAAA do Gmail
-// (ENETUNREACH). Solução definitiva: resolver o A (IPv4) da mão e conectar
-// direto nesse IP — sem ambiguidade nenhuma sobre qual família é usada.
-try { dns.setDefaultResultOrder("ipv4first"); } catch { /* Node < 18 */ }
-
-const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || GMAIL_USER;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const MAIL_FROM = process.env.MAIL_FROM || "contato@psivivianeferrari.com.br";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || MAIL_FROM;
 const FROM_NAME = process.env.MAIL_FROM_NAME || "Viviane Ferrari — Psicóloga";
 const SITE_URL = process.env.SITE_URL || "https://www.psivivianeferrari.com.br";
 
-const configured = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
+const configured = Boolean(RESEND_API_KEY);
 if (!configured) {
-  console.warn("[mailer] GMAIL_USER/GMAIL_APP_PASSWORD não configurados — e-mails serão apenas registrados no log.");
-}
-
-let gmailIp = null;
-async function resolveGmailIp() {
-  if (gmailIp) return gmailIp;
-  try {
-    const addrs = await dns.promises.resolve4("smtp.gmail.com");
-    gmailIp = addrs[0];
-  } catch (err) {
-    console.warn("[mailer] não consegui resolver IPv4 do smtp.gmail.com, usando o hostname mesmo:", err.message);
-    gmailIp = "smtp.gmail.com";
-  }
-  return gmailIp;
-}
-
-async function buildTransporter() {
-  const host = await resolveGmailIp();
-  return nodemailer.createTransport({
-    host,
-    port: 465,
-    secure: true,
-    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-    // conectando por IP, o TLS precisa saber o hostname real pra validar o certificado
-    tls: { servername: "smtp.gmail.com" },
-    // falha rápido (padrão é ~2min) pra deixar as 3 tentativas do sendMail
-    // com um tempo total razoável em vez de travar minutos por instabilidade
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 20000,
-    family: 4,
-  });
+  console.warn("[mailer] RESEND_API_KEY não configurada — e-mails serão apenas registrados no log.");
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,14 +39,16 @@ async function sendMail({ to, subject, html }, attempt = 1) {
     return;
   }
   try {
-    const transporter = await buildTransporter();
-    await transporter.sendMail({ from: `"${FROM_NAME}" <${GMAIL_USER}>`, to, subject, html });
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: `${FROM_NAME} <${MAIL_FROM}>`, to, subject, html }),
+    });
+    if (!response.ok) throw new Error(`Resend ${response.status}: ${await response.text()}`);
   } catch (err) {
-    gmailIp = null; // pode ter sido um IP ruim/trocado — resolve de novo na próxima tentativa
-    // instabilidade de rede pontual entre o servidor e o Gmail — vale tentar de novo
     if (attempt < 3) {
       console.warn(`[mailer] tentativa ${attempt} falhou para ${to} (${err.message}) — tentando de novo…`);
-      await sleep(2000 * attempt);
+      await sleep(1500 * attempt);
       return sendMail({ to, subject, html }, attempt + 1);
     }
     console.error(`[mailer] falha ao enviar "${subject}" para ${to} após ${attempt} tentativas:`, err.message);
