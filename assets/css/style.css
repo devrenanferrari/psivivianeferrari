@@ -44,9 +44,45 @@ body {
   background: var(--paper);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 img { max-width: 100%; display: block; }
+
+a, button, .btn, [role="button"] { touch-action: manipulation; }
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -60px;
+  z-index: 200;
+  background: var(--cream);
+  color: var(--wine-deep);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.8rem 1.4rem;
+  border-radius: 999px;
+  text-decoration: none;
+  box-shadow: var(--shadow-soft);
+  transition: top 0.3s var(--ease);
+}
+
+.skip-link:focus { top: 1rem; }
+
+:focus-visible {
+  outline: 2px solid var(--wine);
+  outline-offset: 3px;
+}
+
+/* fundos escuros precisam de um anel claro pra continuar visível */
+.site-header :focus-visible,
+.hero :focus-visible,
+.como-funciona :focus-visible,
+.final-card :focus-visible,
+.site-footer :focus-visible {
+  outline-color: var(--blush);
+}
 
 .container {
   width: min(1140px, 92vw);
@@ -111,7 +147,24 @@ h1 em, h2 em {
 }
 
 .btn:hover { transform: translateY(-2px); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn.is-loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn.is-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: btn-spin 0.7s linear infinite;
+}
+.btn-primary.is-loading::after, .btn-ghost.is-loading::after { color: var(--cream); }
+.btn-light.is-loading::after, .btn-ghost-dark.is-loading::after { color: var(--wine-deep); }
+
+@keyframes btn-spin { to { transform: rotate(360deg); } }
 
 .btn-primary {
   background: var(--wine-deep);
@@ -242,12 +295,19 @@ h1 em, h2 em {
 .nav-toggle {
   display: none;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
+  width: 44px;
+  height: 44px;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 6px;
+  border-radius: 50%;
+  transition: background 0.3s;
 }
+
+.nav-toggle:active { background: rgba(255, 237, 218, 0.12); }
 
 .nav-toggle span {
   width: 26px; height: 2px;
@@ -553,6 +613,8 @@ h1 em, h2 em {
   border-color: rgba(156, 121, 97, 0.4);
 }
 
+.card:active { transform: translateY(-2px) scale(0.99); }
+
 .card:hover::before { transform: scale(1.5); }
 
 .card-num {
@@ -602,6 +664,8 @@ h1 em, h2 em {
   border-color: rgba(213, 188, 173, 0.45);
   transform: translateY(-4px);
 }
+
+.step:active { transform: translateY(-1px) scale(0.99); }
 
 .step-num {
   display: grid;
@@ -719,6 +783,7 @@ h1 em, h2 em {
 }
 
 .path-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-deep); }
+.path-card:active { transform: translateY(-2px) scale(0.99); }
 
 .path-card-alt {
   background: #fff;
@@ -775,10 +840,12 @@ h1 em, h2 em {
 
 .wizard-progress-bar {
   height: 100%;
-  width: 25%;
+  width: 100%;
   border-radius: 99px;
   background: linear-gradient(90deg, var(--caramel), var(--wine));
-  transition: width 0.5s var(--ease);
+  transform: scaleX(0.25);
+  transform-origin: left;
+  transition: transform 0.5s var(--ease);
 }
 
 .wizard-stepcount {
@@ -857,6 +924,9 @@ h1 em, h2 em {
 
 .choice:hover .choice-card,
 .choice:hover .choice-chip { border-color: var(--caramel); transform: translateY(-2px); }
+
+.choice:active .choice-card,
+.choice:active .choice-chip { transform: translateY(0) scale(0.97); }
 
 .choice input:checked + .choice-card,
 .choice input:checked + .choice-chip {
@@ -1106,7 +1176,7 @@ h1 em, h2 em {
 .float-actions {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  bottom: calc(22px + env(safe-area-inset-bottom));
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -1130,6 +1200,8 @@ h1 em, h2 em {
   filter: brightness(1.06);
 }
 
+.float-btn:active { transform: translateY(-1px) scale(0.96); }
+
 .float-whatsapp { background: #25d366; color: #fff; }
 
 .float-instagram {
@@ -1138,7 +1210,7 @@ h1 em, h2 em {
 }
 
 @media (max-width: 760px) {
-  .float-actions { right: 16px; bottom: 16px; }
+  .float-actions { right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); }
   .float-btn { width: 50px; height: 50px; }
 }
 

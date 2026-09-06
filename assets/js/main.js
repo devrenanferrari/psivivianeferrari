@@ -97,7 +97,7 @@ const render = () => {
 
   const done = current > TOTAL_STEPS;
   wizardNav.hidden = done;
-  bar.style.width = `${(Math.min(current, TOTAL_STEPS) / TOTAL_STEPS) * 100}%`;
+  bar.style.transform = `scaleX(${Math.min(current, TOTAL_STEPS) / TOTAL_STEPS})`;
   stepCurrent.textContent = Math.min(current, TOTAL_STEPS);
 
   prevBtn.disabled = current === 1;

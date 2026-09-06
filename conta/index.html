@@ -2,7 +2,8 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#401216" />
   <title>Área do Paciente — Viviane Ferrari</title>
   <meta name="robots" content="noindex" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%23401216'/><text x='50' y='64' font-size='38' text-anchor='middle' fill='%23FFEDDA' font-family='Georgia,serif' font-style='italic'>VF</text></svg>" />
@@ -48,9 +49,13 @@
           <label for="loginEmail">E-mail</label>
           <input type="email" id="loginEmail" autocomplete="email" required />
         </div>
-        <div class="field">
+        <div class="field field-password">
           <label for="loginSenha">Senha</label>
           <input type="password" id="loginSenha" autocomplete="current-password" required />
+          <button type="button" class="field-password-toggle" data-for="loginSenha" aria-label="Mostrar senha">
+            <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.06-6.06M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19m-6.3-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+          </button>
         </div>
         <button type="submit" class="btn btn-primary btn-block">Entrar</button>
       </form>
@@ -68,9 +73,13 @@
           <label for="suTel">WhatsApp (com DDD)</label>
           <input type="tel" id="suTel" autocomplete="tel" placeholder="32 99999-9999" required />
         </div>
-        <div class="field">
+        <div class="field field-password">
           <label for="suSenha">Senha (mín. 6 caracteres)</label>
           <input type="password" id="suSenha" autocomplete="new-password" minlength="6" required />
+          <button type="button" class="field-password-toggle" data-for="suSenha" aria-label="Mostrar senha">
+            <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.06-6.06M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19m-6.3-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+          </button>
         </div>
         <button type="submit" class="btn btn-primary btn-block">Criar minha conta</button>
       </form>
@@ -210,23 +219,48 @@
       el.classList.toggle("is-visible", Boolean(msg));
     }
 
+    /* ── Mostrar/ocultar senha ── */
+    document.querySelectorAll(".field-password-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = $(btn.dataset.for);
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.classList.toggle("is-visible", show);
+        btn.setAttribute("aria-label", show ? "Ocultar senha" : "Mostrar senha");
+      });
+    });
+
+    /* ── Feedback de carregamento em botões ── */
+    async function withLoading(button, fn) {
+      button.classList.add("is-loading");
+      button.disabled = true;
+      try {
+        await fn();
+      } finally {
+        button.classList.remove("is-loading");
+        button.disabled = false;
+      }
+    }
+
     $("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = e.target.querySelector("button[type=submit]");
       try {
-        await VFStore.login($("loginEmail").value, $("loginSenha").value);
+        await withLoading(btn, () => VFStore.login($("loginEmail").value, $("loginSenha").value));
         await boot();
       } catch (err) { showAuthError(err.message); }
     });
 
     $("signupForm").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = e.target.querySelector("button[type=submit]");
       try {
-        await VFStore.signup({
+        await withLoading(btn, () => VFStore.signup({
           nome: $("suNome").value,
           email: $("suEmail").value,
           tel: $("suTel").value,
           senha: $("suSenha").value,
-        });
+        }));
         await boot();
         toast("Conta criada — bem-vindo(a)!");
       } catch (err) { showAuthError(err.message); }

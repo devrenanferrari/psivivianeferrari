@@ -116,9 +116,7 @@ Com o servidor local rodando, abra `http://localhost:8787` — `config.js` com `
 
 ## Antes de publicar
 
-1. **CRP**: substitua `CRP 00/00000` pelo registro real (header, sobre e rodapé).
-2. **E-mail**: confirme o endereço no rodapé (`psivivianeferrari@gmail.com`).
-3. **Textos**: revise formação, especialidades e valores na conversa inicial.
+1. **Textos**: revise formação, especialidades e valores na conversa inicial.
 
 WhatsApp (`5532984146528`) e Instagram (`@psivivianeferrari`) já estão configurados no wizard, no rodapé e nos botões flutuantes.
 
