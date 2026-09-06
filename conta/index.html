@@ -99,6 +99,27 @@
     </div>
   </main>
 
+  <!-- ══════════ TROCAR SENHA (1º acesso, conta criada pelo painel) ══════════ -->
+  <main class="auth-wrap" id="changePassView" hidden>
+    <div class="auth-card">
+      <div class="auth-seal">VF</div>
+      <h1>Defina sua senha</h1>
+      <p>Sua conta foi criada pela Viviane com uma senha provisória. Defina uma nova senha, só sua, para continuar.</p>
+      <p class="form-error" id="changePassError"></p>
+      <form id="changePassForm">
+        <div class="field field-password">
+          <label for="newSenha">Nova senha (mín. 6 caracteres)</label>
+          <input type="password" id="newSenha" autocomplete="new-password" minlength="6" required />
+          <button type="button" class="field-password-toggle" data-for="newSenha" aria-label="Mostrar senha">
+            <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.06-6.06M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19m-6.3-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+          </button>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Salvar e continuar</button>
+      </form>
+    </div>
+  </main>
+
   <!-- ══════════ APP ══════════ -->
   <main class="app container" id="appView" hidden>
     <div class="app-head">
@@ -554,22 +575,22 @@
     }
 
     /* ── Boot ── */
-    // Desligado por enquanto: o envio de e-mail ainda não está confiável
-    // (domínio no Resend em verificação). Reative trocando pra true assim
-    // que os e-mails estiverem chegando de verdade.
-    const REQUIRE_EMAIL_VERIFICATION = false;
+    const REQUIRE_EMAIL_VERIFICATION = true;
     let verifyPoll = null;
 
     async function boot() {
       const me = await VFStore.me();
-      const precisaVerificar = REQUIRE_EMAIL_VERIFICATION && me && me.emailVerificado === false;
+      const precisaTrocarSenha = me && me.precisaTrocarSenha === true;
+      const precisaVerificar = !precisaTrocarSenha && REQUIRE_EMAIL_VERIFICATION && me && me.emailVerificado === false;
 
       $("authView").hidden = Boolean(me);
+      $("changePassView").hidden = !precisaTrocarSenha;
       $("verifyView").hidden = !precisaVerificar;
-      $("appView").hidden = !me || precisaVerificar;
+      $("appView").hidden = !me || precisaTrocarSenha || precisaVerificar;
       $("logoutBtn").hidden = !me;
 
       clearInterval(verifyPoll);
+      if (precisaTrocarSenha) return;
       if (precisaVerificar) {
         $("verifyEmail").textContent = me.email;
         // confirma sozinho, sem precisar recarregar, assim que o link for clicado em outra aba
@@ -585,6 +606,21 @@
       await refreshData();
       await renderDays();
     }
+
+    $("changePassForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("changePassError");
+      err.classList.remove("is-visible");
+      const btn = e.target.querySelector("button[type=submit]");
+      try {
+        await withLoading(btn, () => VFStore.changePassword($("newSenha").value));
+        toast("Senha atualizada.");
+        await boot();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.add("is-visible");
+      }
+    });
 
     $("resendBtn").addEventListener("click", async () => {
       const btn = $("resendBtn");

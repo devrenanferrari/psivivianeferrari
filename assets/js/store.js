@@ -87,7 +87,8 @@ const VFStore = (() => {
       if (list.some((p) => p.email === email)) throw new Error("Já existe um paciente com este e-mail.");
       const patient = {
         id: uid(), nome: nome.trim(), email, tel: (tel || "").trim(),
-        senhaHash: await sha256(senha), criadoEm: new Date().toISOString(), emailVerificado: true,
+        senhaHash: await sha256(senha), criadoEm: new Date().toISOString(),
+        emailVerificado: true, precisaTrocarSenha: true,
       };
       list.push(patient);
       lwrite("patients", list);
@@ -111,6 +112,16 @@ const VFStore = (() => {
     },
 
     async resendVerification() { /* nada a fazer no modo demonstração */ },
+
+    async changePassword(senha) {
+      const me = await this.me();
+      if (!me) throw new Error("Sessão expirada.");
+      const list = lread("patients", []);
+      const patient = list.find((p) => p.id === me.id);
+      patient.senhaHash = await sha256(senha);
+      patient.precisaTrocarSenha = false;
+      lwrite("patients", list);
+    },
 
     async adminConfigured() { return Boolean(lread("adminPass", null)); },
     async adminSetup(senha) {
@@ -297,6 +308,7 @@ const VFStore = (() => {
       try { return await call("/api/me"); } catch { return null; }
     },
     async resendVerification() { return call("/api/resend-verification", { method: "POST" }); },
+    async changePassword(senha) { return call("/api/change-password", { method: "POST", body: { senha } }); },
 
     async adminConfigured() { return (await call("/api/admin/status")).configured; },
     async adminSetup(senha) {
@@ -386,7 +398,7 @@ const VFStore = (() => {
 
   // Delega cada método ao backend ativo no momento da chamada
   [
-    "signup", "login", "logout", "me", "resendVerification",
+    "signup", "login", "logout", "me", "resendVerification", "changePassword",
     "adminConfigured", "adminSetup", "adminLogin", "adminLogged", "adminLogout",
     "availability", "setAvailability", "availabilityExceptions", "setAvailabilityException", "removeAvailabilityException", "slotsFor",
     "myAppointments", "allAppointments", "book", "setStatus",

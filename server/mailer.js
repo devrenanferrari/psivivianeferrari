@@ -202,4 +202,43 @@ async function notifyReminder({ patient, appointment }) {
   });
 }
 
-module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder, notifyEmailVerification };
+const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function messageCard(texto) {
+  const preview = texto.length > 500 ? texto.slice(0, 500) + "…" : texto;
+  const safe = escapeHtml(preview).replace(/\n/g, "<br>");
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${COLORS.cream};border-radius:14px;margin:20px 0">
+      <tr><td style="padding:18px 22px;font-family:Helvetica,Arial,sans-serif;font-size:15px;color:${COLORS.ink}">${safe}</td></tr>
+    </table>`;
+}
+
+async function notifyNewMessage({ patient, texto, de }) {
+  if (de === "paciente") {
+    await sendMail({
+      to: ADMIN_EMAIL,
+      subject: `Nova mensagem · ${patient.nome}`,
+      html: layout(
+        "Nova mensagem",
+        `<p><strong>${patient.nome}</strong> mandou uma mensagem:</p>
+         ${messageCard(texto)}
+         ${button("Responder no Painel", `${SITE_URL}/admin/`)}`
+      ),
+    });
+  } else {
+    const primeiroNome = patient.nome.split(" ")[0];
+    await sendMail({
+      to: patient.email,
+      subject: "Nova mensagem de Viviane Ferrari",
+      html: layout(
+        "Nova mensagem",
+        `<p>Olá, ${primeiroNome}!</p>
+         <p>Você recebeu uma mensagem:</p>
+         ${messageCard(texto)}
+         ${button("Ver e responder", `${SITE_URL}/conta/`)}`
+      ),
+    });
+  }
+}
+
+module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder, notifyEmailVerification, notifyNewMessage };

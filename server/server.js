@@ -15,8 +15,8 @@
    - DATABASE_URL       · obrigatória (Postgres)
    - PORT               · porta HTTP (padrão 8787; o Railway define a sua)
    - VF_TIMEZONE        · fuso usado para "hoje" (padrão America/Sao_Paulo)
-   - GMAIL_USER          )
-   - GMAIL_APP_PASSWORD  ) ver server/mailer.js — opcionais, sem eles os
+   - RESEND_API_KEY      )
+   - MAIL_FROM           ) ver server/mailer.js — opcionais, sem eles os
    - ADMIN_EMAIL         ) e-mails de agendamento são apenas registrados
                           ) no log, sem interromper o agendamento.
    ═══════════════════════════════════════════════ */
@@ -69,11 +69,13 @@ async function ensureSchema() {
       senha_hash TEXT NOT NULL,
       criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
       email_verificado BOOLEAN NOT NULL DEFAULT false,
-      verify_token TEXT
+      verify_token TEXT,
+      precisa_trocar_senha BOOLEAN NOT NULL DEFAULT false
     );
 
     ALTER TABLE patients ADD COLUMN IF NOT EXISTS email_verificado BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE patients ADD COLUMN IF NOT EXISTS verify_token TEXT;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS precisa_trocar_senha BOOLEAN NOT NULL DEFAULT false;
 
     CREATE TABLE IF NOT EXISTS admin_config (
       id INTEGER PRIMARY KEY DEFAULT 1,
@@ -143,7 +145,10 @@ const hashPass = (senha, salt) => crypto.scryptSync(String(senha), salt, 48).toS
 
 const todayStr = () => new Date().toLocaleDateString("sv-SE", { timeZone: TIMEZONE });
 
-const rowPatient = (r) => r && { id: r.id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.criado_em, emailVerificado: r.email_verificado };
+const rowPatient = (r) => r && {
+  id: r.id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.criado_em,
+  emailVerificado: r.email_verificado, precisaTrocarSenha: r.precisa_trocar_senha,
+};
 const rowAppointment = (r) => r && { id: r.id, patientId: r.patient_id, data: r.data, hora: r.hora, status: r.status, criadoEm: r.criado_em };
 const rowMessage = (r) => r && { id: r.id, patientId: r.patient_id, de: r.de, texto: r.texto, em: r.em, lida: r.lida };
 
@@ -286,6 +291,19 @@ async function handleApi(req, res, url) {
     const verifyToken = newToken();
     await pool.query("UPDATE patients SET verify_token = $1 WHERE id = $2", [verifyToken, me.id]);
     mailer.notifyEmailVerification({ patient: rowPatient(me), verifyUrl: `${SITE_URL}/api/verify-email?token=${verifyToken}` }).catch((err) => console.error("[mailer]", err));
+    return json(res, 200, { ok: true });
+  }
+
+  if (p === "/api/change-password" && method === "POST") {
+    const me = await patientFromReq(req);
+    if (!me) return json(res, 401, { error: "Sessão expirada." });
+    const b = await readBody(req);
+    if (String(b.senha || "").length < 6) return json(res, 400, { error: "Use uma senha com pelo menos 6 caracteres." });
+    const salt = crypto.randomBytes(12).toString("hex");
+    await pool.query(
+      "UPDATE patients SET senha_hash = $1, salt = $2, precisa_trocar_senha = false WHERE id = $3",
+      [hashPass(b.senha, salt), salt, me.id]
+    );
     return json(res, 200, { ok: true });
   }
 
@@ -514,13 +532,15 @@ async function handleApi(req, res, url) {
     if (!texto) return json(res, 400, { error: "Mensagem vazia." });
 
     if (await isAdminReq(req)) {
-      const exists = await pool.query("SELECT 1 FROM patients WHERE id = $1", [b.patientId]);
-      if (!exists.rows.length) return json(res, 400, { error: "Paciente inválido." });
+      const { rows: pRows } = await pool.query("SELECT * FROM patients WHERE id = $1", [b.patientId]);
+      if (!pRows.length) return json(res, 400, { error: "Paciente inválido." });
       const { rows } = await pool.query(
         "INSERT INTO messages (id, patient_id, de, texto) VALUES ($1, $2, 'psicologa', $3) RETURNING *",
         [uid(), b.patientId, texto]
       );
-      return json(res, 200, rowMessage(rows[0]));
+      const msg = rowMessage(rows[0]);
+      mailer.notifyNewMessage({ patient: rowPatient(pRows[0]), texto, de: "psicologa" }).catch((err) => console.error("[mailer]", err));
+      return json(res, 200, msg);
     }
     const me = await patientFromReq(req);
     if (!me) return json(res, 401, { error: "Sessão expirada." });
@@ -528,7 +548,9 @@ async function handleApi(req, res, url) {
       "INSERT INTO messages (id, patient_id, de, texto) VALUES ($1, $2, 'paciente', $3) RETURNING *",
       [uid(), me.id, texto]
     );
-    return json(res, 200, rowMessage(rows[0]));
+    const msg = rowMessage(rows[0]);
+    mailer.notifyNewMessage({ patient: rowPatient(me), texto, de: "paciente" }).catch((err) => console.error("[mailer]", err));
+    return json(res, 200, msg);
   }
 
   if (p === "/api/messages/read" && method === "POST") {
@@ -562,9 +584,10 @@ async function handleApi(req, res, url) {
     if (exists.rows.length) return json(res, 409, { error: "Já existe um paciente com este e-mail." });
     const id = uid();
     const salt = crypto.randomBytes(12).toString("hex");
-    // cadastrado pela psicóloga: e-mail já considerado confirmado, sem precisar do link de verificação
+    // cadastrado pela psicóloga: e-mail já considerado confirmado (sem link de
+    // verificação), mas a senha é provisória — ela precisa trocar no 1º acesso
     await pool.query(
-      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash, email_verificado) VALUES ($1, $2, $3, $4, $5, $6, true)",
+      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash, email_verificado, precisa_trocar_senha) VALUES ($1, $2, $3, $4, $5, $6, true, true)",
       [id, nome, email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt)]
     );
     const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [id]);
