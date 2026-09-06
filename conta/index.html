@@ -554,11 +554,15 @@
     }
 
     /* ── Boot ── */
+    // Desligado por enquanto: o envio de e-mail ainda não está confiável
+    // (domínio no Resend em verificação). Reative trocando pra true assim
+    // que os e-mails estiverem chegando de verdade.
+    const REQUIRE_EMAIL_VERIFICATION = false;
     let verifyPoll = null;
 
     async function boot() {
       const me = await VFStore.me();
-      const precisaVerificar = me && me.emailVerificado === false;
+      const precisaVerificar = REQUIRE_EMAIL_VERIFICATION && me && me.emailVerificado === false;
 
       $("authView").hidden = Boolean(me);
       $("verifyView").hidden = !precisaVerificar;
