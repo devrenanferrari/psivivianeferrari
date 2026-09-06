@@ -266,7 +266,7 @@ h1 em, h2 em {
 .brand-text strong { font-weight: 500; letter-spacing: 0.02em; display: block; }
 .brand-text small { font-size: 0.72rem; letter-spacing: 0.08em; opacity: 0.75; }
 
-.main-nav { display: flex; gap: 2rem; }
+.main-nav { display: flex; align-items: center; gap: 2rem; }
 
 .main-nav a {
   color: var(--cream);
