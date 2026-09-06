@@ -474,7 +474,14 @@ function serveStatic(req, res, url) {
     return res.end("404");
   }
 
-  res.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream" });
+  const ext = path.extname(file).toLowerCase();
+  const longLived = [".jpg", ".jpeg", ".png", ".svg", ".ico", ".woff2"].includes(ext);
+  res.writeHead(200, {
+    "Content-Type": MIME[ext] || "application/octet-stream",
+    // HTML/CSS/JS sempre revalidam — evita telas desatualizadas depois de um deploy.
+    // Fotos e ícones mudam raramente e podem ficar em cache por mais tempo.
+    "Cache-Control": longLived ? "public, max-age=86400" : "no-cache",
+  });
   fs.createReadStream(file).pipe(res);
 }
 

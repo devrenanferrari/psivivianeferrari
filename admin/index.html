@@ -356,7 +356,8 @@
         const open = (availabilityMap[weekday] || []).length;
         const booked = active.filter((a) => a.data === dateStr).length;
         totalOpen += open; totalBooked += booked;
-        const pct = open ? Math.min(100, Math.round((booked / open) * 100)) : 0;
+        // mínimo de 8% pra qualquer sessão marcada aparecer visível na barra (1 de 7 horários = 14%, mas 1 de 20 seria quase invisível)
+        const pct = open ? (booked ? Math.max(8, Math.min(100, Math.round((booked / open) * 100))) : 0) : 0;
         const col = document.createElement("div");
         col.className = "wday" + (i === 0 ? " is-today" : "") + (open === 0 ? " is-off" : "");
         col.title = open ? `${VFStore.formatDate(dateStr)}: ${booked} de ${open} horários` : `${VFStore.formatDate(dateStr)}: sem atendimento`;
