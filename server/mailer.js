@@ -144,6 +144,21 @@ async function notifyBookingCreated({ patient, appointment }) {
   });
 }
 
+async function notifyEmailVerification({ patient, verifyUrl }) {
+  const primeiroNome = patient.nome.split(" ")[0];
+  await sendMail({
+    to: patient.email,
+    subject: "Confirme seu e-mail",
+    html: layout(
+      "Confirme seu e-mail",
+      `<p>Olá, ${primeiroNome}!</p>
+       <p>Sua conta na Área do Paciente foi criada. Confirme seu e-mail para garantir que os avisos de agendamento cheguem certinho:</p>
+       ${button("Confirmar meu e-mail", verifyUrl)}
+       <p style="margin-top:22px;font-size:13px;color:${COLORS.inkSoft}">Se você não criou essa conta, pode ignorar este e-mail.</p>`
+    ),
+  });
+}
+
 async function notifyStatusChanged({ patient, appointment }) {
   const primeiroNome = patient.nome.split(" ")[0];
   const confirmada = appointment.status === "confirmada";
@@ -179,4 +194,4 @@ async function notifyReminder({ patient, appointment }) {
   });
 }
 
-module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder };
+module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder, notifyEmailVerification };

@@ -566,6 +566,13 @@
       // modo local: sincroniza com o painel aberto em outra aba
       window.addEventListener("storage", () => { if (!$("appView").hidden) refreshData(); });
       await boot();
+
+      // veio do link de confirmação de e-mail?
+      const params = new URLSearchParams(location.search);
+      if (params.has("verificado")) {
+        toast(params.get("verificado") === "1" ? "E-mail confirmado ✓" : "Link de confirmação inválido ou já usado.");
+        history.replaceState({}, "", location.pathname);
+      }
     })();
   </script>
 </body>

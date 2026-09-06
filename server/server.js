@@ -35,6 +35,7 @@ types.setTypeParser(1082, (val) => val);
 const PORT = process.env.PORT || 8787;
 const ROOT = path.join(__dirname, "..");
 const TIMEZONE = process.env.VF_TIMEZONE || "America/Sao_Paulo";
+const SITE_URL = process.env.SITE_URL || "https://www.psivivianeferrari.com.br";
 
 if (!process.env.DATABASE_URL) {
   console.error("Faltando DATABASE_URL. Configure a conexão com o Postgres antes de iniciar.");
@@ -66,8 +67,13 @@ async function ensureSchema() {
       tel TEXT NOT NULL DEFAULT '',
       salt TEXT NOT NULL,
       senha_hash TEXT NOT NULL,
-      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      email_verificado BOOLEAN NOT NULL DEFAULT false,
+      verify_token TEXT
     );
+
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS email_verificado BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE patients ADD COLUMN IF NOT EXISTS verify_token TEXT;
 
     CREATE TABLE IF NOT EXISTS admin_config (
       id INTEGER PRIMARY KEY DEFAULT 1,
@@ -137,7 +143,7 @@ const hashPass = (senha, salt) => crypto.scryptSync(String(senha), salt, 48).toS
 
 const todayStr = () => new Date().toLocaleDateString("sv-SE", { timeZone: TIMEZONE });
 
-const rowPatient = (r) => r && { id: r.id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.criado_em };
+const rowPatient = (r) => r && { id: r.id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.criado_em, emailVerificado: r.email_verificado };
 const rowAppointment = (r) => r && { id: r.id, patientId: r.patient_id, data: r.data, hora: r.hora, status: r.status, criadoEm: r.criado_em };
 const rowMessage = (r) => r && { id: r.id, patientId: r.patient_id, de: r.de, texto: r.texto, em: r.em, lida: r.lida };
 
@@ -250,14 +256,27 @@ async function handleApi(req, res, url) {
 
     const id = uid();
     const salt = crypto.randomBytes(12).toString("hex");
+    const verifyToken = newToken();
     await pool.query(
-      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash) VALUES ($1, $2, $3, $4, $5, $6)",
-      [id, String(b.nome).trim(), email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt)]
+      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash, verify_token) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [id, String(b.nome).trim(), email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt), verifyToken]
     );
     const t = newToken();
     await pool.query("INSERT INTO patient_tokens (token, patient_id) VALUES ($1, $2)", [t, id]);
     const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [id]);
-    return json(res, 200, { token: t, patient: rowPatient(rows[0]) });
+    const patient = rowPatient(rows[0]);
+    mailer.notifyEmailVerification({ patient, verifyUrl: `${SITE_URL}/api/verify-email?token=${verifyToken}` }).catch((err) => console.error("[mailer]", err));
+    return json(res, 200, { token: t, patient });
+  }
+
+  if (p === "/api/verify-email" && method === "GET") {
+    const token = url.searchParams.get("token") || "";
+    const { rows } = await pool.query(
+      "UPDATE patients SET email_verificado = true, verify_token = NULL WHERE verify_token = $1 RETURNING id",
+      [token]
+    );
+    res.writeHead(302, { Location: `${SITE_URL}/conta/?verificado=${rows.length ? 1 : 0}` });
+    return res.end();
   }
 
   if (p === "/api/login" && method === "POST") {

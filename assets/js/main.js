@@ -21,6 +21,7 @@ window.addEventListener("scroll", onScroll, { passive: true });
 /* ── Menu mobile ────────────────────────────── */
 const navToggle = document.getElementById("navToggle");
 const mainNav = document.getElementById("mainNav");
+const navScrim = document.getElementById("navScrim");
 let scrollLockY = 0;
 
 // `overflow:hidden` sozinho não trava o scroll no Safari/iOS (a página ainda
@@ -48,6 +49,7 @@ function unlockScroll() {
 function setMenuOpen(open) {
   menuOpen = open;
   mainNav.classList.toggle("is-open", open);
+  navScrim.classList.toggle("is-open", open);
   navToggle.setAttribute("aria-expanded", String(open));
   navToggle.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
   document.documentElement.classList.toggle("menu-open", open);
@@ -61,6 +63,7 @@ function setMenuOpen(open) {
 }
 
 navToggle.addEventListener("click", () => setMenuOpen(!menuOpen));
+navScrim.addEventListener("click", () => setMenuOpen(false));
 
 mainNav.querySelectorAll("a").forEach((link) =>
   link.addEventListener("click", () => setMenuOpen(false))
