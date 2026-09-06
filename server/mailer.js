@@ -16,6 +16,11 @@
 
 const nodemailer = require("nodemailer");
 
+// O Railway não tem rota IPv6 de saída, mas o DNS do smtp.gmail.com retorna
+// endereço IPv6 — sem isso o Node tenta conectar por IPv6 primeiro e cai em
+// ENETUNREACH. Node 18+ tem essa opção pronta pra forçar IPv4 primeiro.
+try { require("dns").setDefaultResultOrder("ipv4first"); } catch { /* Node < 18 */ }
+
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || GMAIL_USER;
@@ -32,6 +37,7 @@ const transporter =
         connectionTimeout: 15000,
         greetingTimeout: 15000,
         socketTimeout: 20000,
+        family: 4,
       })
     : null;
 
