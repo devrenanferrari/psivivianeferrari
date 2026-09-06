@@ -124,9 +124,28 @@
           <div style="display:flex; gap:0.6rem; align-items:center">
             <input type="search" class="search-input" id="agendaSearch" placeholder="Buscar paciente…" />
             <button class="btn btn-ghost btn-sm" id="exportApptsBtn">Exportar CSV</button>
+            <button class="btn btn-primary btn-sm" id="newApptBtn">Nova sessão</button>
           </div>
         </div>
         <div id="agendaList"></div>
+      </div>
+
+      <div class="p-card" id="newApptCard" hidden>
+        <h2>Cadastrar sessão</h2>
+        <p class="muted" style="margin-bottom:1rem">Já nasce confirmada — use pra registrar sessões combinadas fora do site (WhatsApp, telefone).</p>
+        <div class="field">
+          <label for="newApptPatient">Paciente</label>
+          <select id="newApptPatient"></select>
+        </div>
+        <div class="field" style="max-width:220px">
+          <label for="newApptDate">Data</label>
+          <input type="date" id="newApptDate" />
+        </div>
+        <div id="newApptSlots" class="avail-hours"></div>
+        <div style="display:flex; gap:0.7rem; flex-wrap:wrap; margin-top:1rem">
+          <button class="btn btn-primary" id="newApptSave">Cadastrar sessão</button>
+          <button class="btn btn-ghost" id="newApptCancel">Cancelar</button>
+        </div>
       </div>
     </section>
 
@@ -190,9 +209,40 @@
           <div style="display:flex; gap:0.6rem; align-items:center">
             <input type="search" class="search-input" id="patientSearch" placeholder="Buscar por nome ou e-mail…" />
             <button class="btn btn-ghost btn-sm" id="exportPatientsBtn">Exportar CSV</button>
+            <button class="btn btn-primary btn-sm" id="newPatientBtn">Novo paciente</button>
           </div>
         </div>
         <div id="patientList"></div>
+      </div>
+
+      <div class="p-card" id="newPatientCard" hidden>
+        <h2>Cadastrar paciente</h2>
+        <p class="muted" style="margin-bottom:1rem">Pra registrar alguém que combinou o atendimento por fora do site (WhatsApp, indicação etc.).</p>
+        <div class="field">
+          <label for="newPatNome">Nome completo</label>
+          <input type="text" id="newPatNome" />
+        </div>
+        <div class="field">
+          <label for="newPatEmail">E-mail</label>
+          <input type="email" id="newPatEmail" />
+        </div>
+        <div class="field">
+          <label for="newPatTel">WhatsApp (com DDD)</label>
+          <input type="tel" id="newPatTel" placeholder="32 99999-9999" />
+        </div>
+        <div class="field field-password">
+          <label for="newPatSenha">Senha de acesso (mín. 6 caracteres)</label>
+          <input type="password" id="newPatSenha" minlength="6" />
+          <button type="button" class="field-password-toggle" data-for="newPatSenha" aria-label="Mostrar senha">
+            <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.06-6.06M9.9 4.24A10.6 10.6 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19m-6.3-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+          </button>
+        </div>
+        <p class="hint" style="margin-bottom:1rem">Combine essa senha com a pessoa pra ela acessar a Área do Paciente.</p>
+        <div style="display:flex; gap:0.7rem; flex-wrap:wrap">
+          <button class="btn btn-primary" id="newPatientSave">Cadastrar paciente</button>
+          <button class="btn btn-ghost" id="newPatientCancel">Cancelar</button>
+        </div>
       </div>
     </section>
   </main>
@@ -806,6 +856,97 @@
     }
     $("exportPatientsBtn").addEventListener("click", () => downloadCsv(() => VFStore.exportPatientsCsv(), "pacientes.csv"));
     $("exportApptsBtn").addEventListener("click", () => downloadCsv(() => VFStore.exportAppointmentsCsv(), "sessoes.csv"));
+
+    /* ── Cadastrar paciente ── */
+    $("newPatientBtn").addEventListener("click", () => { $("newPatientCard").hidden = false; $("newPatientBtn").scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+    $("newPatientCancel").addEventListener("click", () => {
+      $("newPatientCard").hidden = true;
+      $("newPatNome").value = ""; $("newPatEmail").value = ""; $("newPatTel").value = ""; $("newPatSenha").value = "";
+    });
+    $("newPatientSave").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      try {
+        await VFStore.createPatient({
+          nome: $("newPatNome").value.trim(),
+          email: $("newPatEmail").value.trim(),
+          tel: $("newPatTel").value.trim(),
+          senha: $("newPatSenha").value,
+        });
+        toast("Paciente cadastrado.");
+        $("newPatientCancel").click();
+        patients = await VFStore.patientsList();
+        renderPatients();
+      } catch (err) { toast(err.message); } finally {
+        btn.classList.remove("is-loading");
+        btn.disabled = false;
+      }
+    });
+
+    /* ── Cadastrar sessão ── */
+    function fillNewApptPatients() {
+      const sel = $("newApptPatient");
+      const current = sel.value;
+      sel.innerHTML = patients.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)} · ${escapeHtml(p.email)}</option>`).join("");
+      if (current) sel.value = current;
+    }
+
+    async function renderNewApptSlots() {
+      const date = $("newApptDate").value;
+      const wrap = $("newApptSlots");
+      if (!date) { wrap.innerHTML = ""; return; }
+      wrap.innerHTML = '<span class="chip chip-skeleton"></span>'.repeat(4);
+      const slots = await VFStore.slotsFor(date);
+      wrap.innerHTML = "";
+      if (!slots.length) {
+        wrap.innerHTML = '<p class="empty" style="padding:1rem"><span class="glyph">✦</span>Nenhum horário livre nessa data.</p>';
+        return;
+      }
+      slots.forEach((h) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "chip" + (h === newApptHora ? " is-selected" : "");
+        btn.textContent = h;
+        btn.addEventListener("click", () => { newApptHora = h; renderNewApptSlots(); });
+        wrap.appendChild(btn);
+      });
+    }
+
+    let newApptHora = null;
+
+    $("newApptBtn").addEventListener("click", () => {
+      fillNewApptPatients();
+      $("newApptCard").hidden = false;
+      $("newApptBtn").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    $("newApptCancel").addEventListener("click", () => {
+      $("newApptCard").hidden = true;
+      $("newApptDate").value = "";
+      newApptHora = null;
+      $("newApptSlots").innerHTML = "";
+    });
+    $("newApptDate").addEventListener("change", () => { newApptHora = null; renderNewApptSlots(); });
+    $("newApptDate").min = VFStore.todayStr();
+
+    $("newApptSave").addEventListener("click", async (e) => {
+      const patientId = $("newApptPatient").value;
+      const date = $("newApptDate").value;
+      if (!patientId) return toast("Cadastre ou escolha um paciente primeiro.");
+      if (!date || !newApptHora) return toast("Escolha data e horário.");
+      const btn = e.currentTarget;
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      try {
+        await VFStore.book(date, newApptHora, { patientId });
+        toast("Sessão cadastrada e confirmada.");
+        $("newApptCancel").click();
+        await refreshData();
+      } catch (err) { toast(err.message); } finally {
+        btn.classList.remove("is-loading");
+        btn.disabled = false;
+      }
+    });
 
     /* ── Navegação ── */
     function activePanel() {

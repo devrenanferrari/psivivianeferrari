@@ -78,6 +78,22 @@ const VFStore = (() => {
       return patient;
     },
 
+    async createPatient({ nome, email, tel, senha }) {
+      const list = lread("patients", []);
+      email = email.trim().toLowerCase();
+      if (!nome.trim() || !email || senha.length < 6) {
+        throw new Error("Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.");
+      }
+      if (list.some((p) => p.email === email)) throw new Error("Já existe um paciente com este e-mail.");
+      const patient = {
+        id: uid(), nome: nome.trim(), email, tel: (tel || "").trim(),
+        senhaHash: await sha256(senha), criadoEm: new Date().toISOString(), emailVerificado: true,
+      };
+      list.push(patient);
+      lwrite("patients", list);
+      return { id: patient.id, nome: patient.nome, email: patient.email, tel: patient.tel };
+    },
+
     async login(email, senha) {
       const patient = lread("patients", []).find((p) => p.email === email.trim().toLowerCase());
       if (!patient || patient.senhaHash !== (await sha256(senha))) {
@@ -144,13 +160,13 @@ const VFStore = (() => {
       });
     },
 
-    async book(data, hora) {
-      const me = await this.me();
+    async book(data, hora, opts = {}) {
+      const patientId = opts.patientId || (await this.me()).id;
       if (!(await this.slotsFor(data)).includes(hora)) {
         throw new Error("Este horário acabou de ser ocupado. Escolha outro, por favor.");
       }
       const list = lread("appointments", []);
-      const appointment = { id: uid(), patientId: me.id, data, hora, status: "pendente", criadoEm: new Date().toISOString() };
+      const appointment = { id: uid(), patientId, data, hora, status: opts.patientId ? "confirmada" : "pendente", criadoEm: new Date().toISOString() };
       list.push(appointment);
       lwrite("appointments", list);
       return appointment;
@@ -310,7 +326,9 @@ const VFStore = (() => {
 
     async myAppointments() { return call("/api/appointments"); },
     async allAppointments() { return call("/api/appointments", { admin: true }); },
-    async book(data, hora) { return call("/api/appointments", { method: "POST", body: { data, hora } }); },
+    async book(data, hora, opts = {}) {
+      return call("/api/appointments", { method: "POST", body: { data, hora, patientId: opts.patientId }, admin: Boolean(opts.patientId) });
+    },
     async setStatus(id, status, { admin = false } = {}) {
       return call("/api/appointments/" + id, { method: "PATCH", body: { status }, admin });
     },
@@ -324,6 +342,7 @@ const VFStore = (() => {
     async markReadFor(patientId) { return call("/api/messages/read", { method: "POST", body: { patientId }, admin: true }); },
 
     async patientsList() { return call("/api/patients", { admin: true }); },
+    async createPatient(dados) { return call("/api/patients", { method: "POST", body: dados, admin: true }); },
     async updatePatient(id, data) { return call("/api/patients/" + id, { method: "PATCH", body: data, admin: true }); },
     async deletePatient(id) { return call("/api/patients/" + id, { method: "DELETE", admin: true }); },
 
@@ -373,7 +392,7 @@ const VFStore = (() => {
     "myAppointments", "allAppointments", "book", "setStatus",
     "myThread", "sendMyMessage", "markMyRead",
     "allMessages", "sendTo", "markReadFor",
-    "patientsList", "updatePatient", "deletePatient", "exportPatientsCsv", "exportAppointmentsCsv",
+    "patientsList", "createPatient", "updatePatient", "deletePatient", "exportPatientsCsv", "exportAppointmentsCsv",
   ].forEach((name) => {
     facade[name] = (...args) => backend[name].apply(backend, args);
   });

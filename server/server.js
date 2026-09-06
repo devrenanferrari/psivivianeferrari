@@ -431,23 +431,38 @@ async function handleApi(req, res, url) {
   }
 
   if (p === "/api/appointments" && method === "POST") {
-    const me = await patientFromReq(req);
-    if (!me) return json(res, 401, { error: "Sessão expirada." });
     const b = await readBody(req);
+    const admin = await isAdminReq(req);
+    let me;
+    if (admin && b.patientId) {
+      const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [b.patientId]);
+      me = rows[0];
+      if (!me) return json(res, 400, { error: "Paciente inválido." });
+    } else {
+      me = await patientFromReq(req);
+      if (!me) return json(res, 401, { error: "Sessão expirada." });
+    }
     if (!DATE_RE.test(b.data || "") || !TIME_RE.test(b.hora || "") || b.data < todayStr()) {
       return json(res, 400, { error: "Data ou horário inválidos." });
     }
     if (!(await slotsFor(b.data)).includes(b.hora)) {
       return json(res, 409, { error: "Este horário acabou de ser ocupado. Escolha outro, por favor." });
     }
-    const appointment = { id: uid(), patientId: me.id, data: b.data, hora: b.hora, status: "pendente" };
+    // quando é a psicóloga cadastrando (não a paciente se agendando sozinha), a sessão já nasce confirmada
+    const status = admin && b.patientId ? "confirmada" : "pendente";
+    const appointment = { id: uid(), patientId: me.id, data: b.data, hora: b.hora, status };
     try {
       const { rows } = await pool.query(
         "INSERT INTO appointments (id, patient_id, data, hora, status) VALUES ($1, $2, $3, $4, $5) RETURNING *",
         [appointment.id, appointment.patientId, appointment.data, appointment.hora, appointment.status]
       );
       const created = rowAppointment(rows[0]);
-      mailer.notifyBookingCreated({ patient: me, appointment: created }).catch((err) => console.error("[mailer]", err));
+      const patientRow = admin && b.patientId ? rowPatient(me) : me;
+      if (status === "confirmada") {
+        mailer.notifyStatusChanged({ patient: patientRow, appointment: created }).catch((err) => console.error("[mailer]", err));
+      } else {
+        mailer.notifyBookingCreated({ patient: me, appointment: created }).catch((err) => console.error("[mailer]", err));
+      }
       return json(res, 200, created);
     } catch (err) {
       if (err.code === "23505") return json(res, 409, { error: "Este horário acabou de ser ocupado. Escolha outro, por favor." });
@@ -533,6 +548,27 @@ async function handleApi(req, res, url) {
     if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
     const { rows } = await pool.query("SELECT * FROM patients ORDER BY nome");
     return json(res, 200, rows.map(rowPatient));
+  }
+
+  if (p === "/api/patients" && method === "POST") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const b = await readBody(req);
+    const email = String(b.email || "").trim().toLowerCase();
+    const nome = String(b.nome || "").trim();
+    if (!nome || !email || String(b.senha || "").length < 6) {
+      return json(res, 400, { error: "Preencha nome, e-mail e uma senha com pelo menos 6 caracteres." });
+    }
+    const exists = await pool.query("SELECT 1 FROM patients WHERE email = $1", [email]);
+    if (exists.rows.length) return json(res, 409, { error: "Já existe um paciente com este e-mail." });
+    const id = uid();
+    const salt = crypto.randomBytes(12).toString("hex");
+    // cadastrado pela psicóloga: e-mail já considerado confirmado, sem precisar do link de verificação
+    await pool.query(
+      "INSERT INTO patients (id, nome, email, tel, salt, senha_hash, email_verificado) VALUES ($1, $2, $3, $4, $5, $6, true)",
+      [id, nome, email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt)]
+    );
+    const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [id]);
+    return json(res, 200, rowPatient(rows[0]));
   }
 
   const patientMatch = p.match(/^\/api\/patients\/([\w]+)$/);
