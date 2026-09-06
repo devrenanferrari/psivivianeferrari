@@ -591,7 +591,9 @@ async function handleApi(req, res, url) {
       [id, nome, email, String(b.tel || "").trim(), salt, hashPass(b.senha, salt)]
     );
     const { rows } = await pool.query("SELECT * FROM patients WHERE id = $1", [id]);
-    return json(res, 200, rowPatient(rows[0]));
+    const patient = rowPatient(rows[0]);
+    mailer.notifyWelcomeFromAdmin({ patient, senhaProvisoria: b.senha }).catch((err) => console.error("[mailer]", err));
+    return json(res, 200, patient);
   }
 
   const patientMatch = p.match(/^\/api\/patients\/([\w]+)$/);

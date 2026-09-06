@@ -152,6 +152,29 @@ async function notifyBookingCreated({ patient, appointment }) {
   });
 }
 
+async function notifyWelcomeFromAdmin({ patient, senhaProvisoria }) {
+  const primeiroNome = patient.nome.split(" ")[0];
+  await sendMail({
+    to: patient.email,
+    subject: "Bem-vindo(a) à Área do Paciente",
+    html: layout(
+      "Bem-vindo(a)!",
+      `<p>Olá, ${primeiroNome}!</p>
+       <p>A Viviane criou uma conta pra você na Área do Paciente — é lá que você acompanha suas sessões e troca mensagens com ela. Use estes dados no primeiro acesso:</p>
+       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${COLORS.cream};border-radius:14px;margin:20px 0">
+         <tr><td style="padding:18px 22px;font-family:Helvetica,Arial,sans-serif">
+           <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${COLORS.caramel};margin-bottom:4px">E-mail</div>
+           <div style="font-size:16px;color:${COLORS.wineDeep};margin-bottom:16px">${patient.email}</div>
+           <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${COLORS.caramel};margin-bottom:4px">Senha provisória</div>
+           <div style="font-size:16px;color:${COLORS.wineDeep};font-weight:bold">${senhaProvisoria}</div>
+         </td></tr>
+       </table>
+       <p>Por segurança, assim que você entrar vamos pedir pra você trocar essa senha por uma só sua.</p>
+       ${button("Entrar na Área do Paciente", `${SITE_URL}/conta/`)}`
+    ),
+  });
+}
+
 async function notifyEmailVerification({ patient, verifyUrl }) {
   const primeiroNome = patient.nome.split(" ")[0];
   await sendMail({
@@ -241,4 +264,4 @@ async function notifyNewMessage({ patient, texto, de }) {
   }
 }
 
-module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder, notifyEmailVerification, notifyNewMessage };
+module.exports = { notifyBookingCreated, notifyStatusChanged, notifyReminder, notifyEmailVerification, notifyNewMessage, notifyWelcomeFromAdmin };
