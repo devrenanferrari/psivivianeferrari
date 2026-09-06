@@ -12,9 +12,13 @@
    compartilhados entre todos os dispositivos.
 
    Variáveis de ambiente:
-   - DATABASE_URL  · obrigatória (Postgres)
-   - PORT          · porta HTTP (padrão 8787; o Railway define a sua)
-   - VF_TIMEZONE   · fuso usado para "hoje" (padrão America/Sao_Paulo)
+   - DATABASE_URL       · obrigatória (Postgres)
+   - PORT               · porta HTTP (padrão 8787; o Railway define a sua)
+   - VF_TIMEZONE        · fuso usado para "hoje" (padrão America/Sao_Paulo)
+   - GMAIL_USER          )
+   - GMAIL_APP_PASSWORD  ) ver server/mailer.js — opcionais, sem eles os
+   - ADMIN_EMAIL         ) e-mails de agendamento são apenas registrados
+                          ) no log, sem interromper o agendamento.
    ═══════════════════════════════════════════════ */
 
 const http = require("http");
@@ -22,6 +26,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { Pool, types } = require("pg");
+const mailer = require("./mailer");
 
 // Coluna DATE deve voltar como "AAAA-MM-DD" (string), não como Date/UTC —
 // o front-end compara datas com operadores de string (>=, <=, ===).
@@ -346,7 +351,9 @@ async function handleApi(req, res, url) {
         "INSERT INTO appointments (id, patient_id, data, hora, status) VALUES ($1, $2, $3, $4, $5) RETURNING *",
         [appointment.id, appointment.patientId, appointment.data, appointment.hora, appointment.status]
       );
-      return json(res, 200, rowAppointment(rows[0]));
+      const created = rowAppointment(rows[0]);
+      mailer.notifyBookingCreated({ patient: me, appointment: created }).catch((err) => console.error("[mailer]", err));
+      return json(res, 200, created);
     } catch (err) {
       if (err.code === "23505") return json(res, 409, { error: "Este horário acabou de ser ocupado. Escolha outro, por favor." });
       throw err;
@@ -364,7 +371,13 @@ async function handleApi(req, res, url) {
     if (await isAdminReq(req)) {
       if (!["pendente", "confirmada", "cancelada"].includes(status)) return json(res, 400, { error: "Status inválido." });
       const { rows } = await pool.query("UPDATE appointments SET status = $1 WHERE id = $2 RETURNING *", [status, appointment.id]);
-      return json(res, 200, rowAppointment(rows[0]));
+      const updated = rowAppointment(rows[0]);
+      if (status === "confirmada" || status === "cancelada") {
+        pool.query("SELECT * FROM patients WHERE id = $1", [updated.patientId]).then(({ rows: p }) => {
+          if (p[0]) mailer.notifyStatusChanged({ patient: rowPatient(p[0]), appointment: updated }).catch((err) => console.error("[mailer]", err));
+        }).catch((err) => console.error("[mailer]", err));
+      }
+      return json(res, 200, updated);
     }
     const me = await patientFromReq(req);
     if (!me || appointment.patient_id !== me.id) return json(res, 401, { error: "Acesso negado." });

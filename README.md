@@ -88,6 +88,23 @@ railway up --service api
 **Pendentes:**
 - Configurar o redirecionamento `psivivianeferrari.com.br` → `https://www.psivivianeferrari.com.br` no painel da Hostinger.
 - Acessar `/admin` em `https://www.psivivianeferrari.com.br/admin/` e fazer o "Primeiro acesso" para criar a senha real do painel (nenhuma senha de admin foi definida em produção).
+- Configurar o e-mail de avisos (`GMAIL_USER`/`GMAIL_APP_PASSWORD`/`ADMIN_EMAIL`) — ver seção "E-mails de agendamento" abaixo.
+
+### E-mails de agendamento
+
+O backend (`server/mailer.js`) envia e-mail via Gmail SMTP em três momentos: paciente solicita sessão (aviso pro paciente + aviso pra psicóloga), e quando a psicóloga confirma ou cancela (aviso pro paciente). Sem as variáveis abaixo configuradas, esses e-mails são apenas ignorados/logados — o agendamento continua funcionando normalmente.
+
+**1. Gerar uma senha de app no Google** (não é a senha normal da conta):
+1. A conta Google precisa ter **verificação em duas etapas** ativada (myaccount.google.com/security).
+2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), crie uma senha de app (qualquer nome, ex. "VF Site") e copie o código de 16 caracteres.
+
+**2. Configurar no Railway:**
+
+```
+railway variables --service api --set "GMAIL_USER=seuemail@gmail.com" --set "GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx" --set "ADMIN_EMAIL=seuemail@gmail.com"
+```
+
+`ADMIN_EMAIL` é opcional (padrão: o próprio `GMAIL_USER`) — use se quiser receber os avisos de novas solicitações em um e-mail diferente do remetente. Não é preciso reimplantar depois de mudar variáveis — o Railway reinicia o serviço sozinho.
 
 ### Para recriar o deploy do zero (referência)
 
