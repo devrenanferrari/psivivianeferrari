@@ -80,14 +80,22 @@ async function ensureSchema() {
       hours JSONB NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS availability_exceptions (
+      data DATE PRIMARY KEY,
+      hours JSONB NOT NULL DEFAULT '[]'
+    );
+
     CREATE TABLE IF NOT EXISTS appointments (
       id TEXT PRIMARY KEY,
       patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
       data DATE NOT NULL,
       hora TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pendente',
-      criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+      lembrete_enviado BOOLEAN NOT NULL DEFAULT false
     );
+
+    ALTER TABLE appointments ADD COLUMN IF NOT EXISTS lembrete_enviado BOOLEAN NOT NULL DEFAULT false;
 
     CREATE UNIQUE INDEX IF NOT EXISTS appointments_active_slot
       ON appointments (data, hora) WHERE status <> 'cancelada';
@@ -134,12 +142,24 @@ const rowAppointment = (r) => r && { id: r.id, patientId: r.patient_id, data: r.
 const rowMessage = (r) => r && { id: r.id, patientId: r.patient_id, de: r.de, texto: r.texto, em: r.em, lida: r.lida };
 
 async function slotsFor(dateStr) {
-  const weekday = new Date(dateStr + "T12:00:00").getDay();
-  const availRes = await pool.query("SELECT hours FROM availability WHERE weekday = $1", [weekday]);
-  const base = availRes.rows[0] ? availRes.rows[0].hours : [];
+  const excRes = await pool.query("SELECT hours FROM availability_exceptions WHERE data = $1", [dateStr]);
+  let base;
+  if (excRes.rows.length) {
+    base = excRes.rows[0].hours;
+  } else {
+    const weekday = new Date(dateStr + "T12:00:00").getDay();
+    const availRes = await pool.query("SELECT hours FROM availability WHERE weekday = $1", [weekday]);
+    base = availRes.rows[0] ? availRes.rows[0].hours : [];
+  }
   const takenRes = await pool.query("SELECT hora FROM appointments WHERE data = $1 AND status <> 'cancelada'", [dateStr]);
   const taken = takenRes.rows.map((r) => r.hora);
   return base.filter((h) => !taken.includes(h));
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -151,6 +171,23 @@ function json(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, {
     "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
+const csvField = (v) => {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+function csvResponse(res, filename, rows) {
+  // BOM no início ajuda o Excel a detectar UTF-8 e não estragar acentos
+  const body = "﻿" + rows.map((r) => r.map(csvField).join(",")).join("\r\n");
+  res.writeHead(200, {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
     "Access-Control-Allow-Origin": "*",
     "Cache-Control": "no-store",
   });
@@ -316,6 +353,35 @@ async function handleApi(req, res, url) {
     return json(res, 200, await slotsFor(date));
   }
 
+  /* — exceções de disponibilidade (feriados, férias, horário especial) — */
+  if (p === "/api/availability/exceptions" && method === "GET") {
+    const { rows } = await pool.query(
+      "SELECT data, hours FROM availability_exceptions WHERE data >= $1 ORDER BY data",
+      [todayStr()]
+    );
+    return json(res, 200, rows.map((r) => ({ data: r.data, hours: r.hours })));
+  }
+
+  if (p === "/api/availability/exceptions" && method === "PUT") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const b = await readBody(req);
+    if (!DATE_RE.test(b.data || "")) return json(res, 400, { error: "Data inválida." });
+    const hours = Array.isArray(b.hours) ? [...new Set(b.hours.filter((h) => TIME_RE.test(h)))].sort() : [];
+    const { rows } = await pool.query(
+      `INSERT INTO availability_exceptions (data, hours) VALUES ($1, $2)
+       ON CONFLICT (data) DO UPDATE SET hours = $2 RETURNING data, hours`,
+      [b.data, JSON.stringify(hours)]
+    );
+    return json(res, 200, rows[0]);
+  }
+
+  const excMatch = p.match(/^\/api\/availability\/exceptions\/(\d{4}-\d{2}-\d{2})$/);
+  if (excMatch && method === "DELETE") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    await pool.query("DELETE FROM availability_exceptions WHERE data = $1", [excMatch[1]]);
+    return json(res, 200, { ok: true });
+  }
+
   /* — agendamentos — */
   if (p === "/api/appointments" && method === "GET") {
     if (await isAdminReq(req)) {
@@ -440,7 +506,69 @@ async function handleApi(req, res, url) {
     return json(res, 200, rows.map(rowPatient));
   }
 
+  const patientMatch = p.match(/^\/api\/patients\/([\w]+)$/);
+  if (patientMatch && method === "PATCH") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const b = await readBody(req);
+    const nome = String(b.nome || "").trim();
+    const email = String(b.email || "").trim().toLowerCase();
+    const tel = String(b.tel || "").trim();
+    if (!nome || !email) return json(res, 400, { error: "Preencha nome e e-mail." });
+    const dup = await pool.query("SELECT 1 FROM patients WHERE email = $1 AND id <> $2", [email, patientMatch[1]]);
+    if (dup.rows.length) return json(res, 409, { error: "Já existe outro paciente com este e-mail." });
+    const { rows } = await pool.query(
+      "UPDATE patients SET nome = $1, email = $2, tel = $3 WHERE id = $4 RETURNING *",
+      [nome, email, tel, patientMatch[1]]
+    );
+    if (!rows.length) return json(res, 404, { error: "Paciente não encontrado." });
+    return json(res, 200, rowPatient(rows[0]));
+  }
+
+  /* — exportação CSV (admin) — */
+  if (p === "/api/export/patients" && method === "GET") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const { rows } = await pool.query("SELECT * FROM patients ORDER BY nome");
+    const lines = [["Nome", "E-mail", "WhatsApp", "Cadastro"]];
+    rows.forEach((r) => lines.push([r.nome, r.email, r.tel, new Date(r.criado_em).toLocaleDateString("pt-BR")]));
+    return csvResponse(res, "pacientes.csv", lines);
+  }
+
+  if (p === "/api/export/appointments" && method === "GET") {
+    if (!(await isAdminReq(req))) return json(res, 401, { error: "Acesso restrito." });
+    const { rows } = await pool.query(`
+      SELECT a.data, a.hora, a.status, p.nome, p.email, p.tel
+      FROM appointments a JOIN patients p ON p.id = a.patient_id
+      ORDER BY a.data, a.hora
+    `);
+    const lines = [["Data", "Horário", "Status", "Paciente", "E-mail", "WhatsApp"]];
+    rows.forEach((r) => lines.push([r.data, r.hora, r.status, r.nome, r.email, r.tel]));
+    return csvResponse(res, "sessoes.csv", lines);
+  }
+
   return json(res, 404, { error: "Rota não encontrada." });
+}
+
+/* ── Lembrete automático (1 dia antes) ──────── */
+
+async function sendDueReminders() {
+  const tomorrow = addDays(todayStr(), 1);
+  const { rows } = await pool.query(
+    `SELECT a.id AS appt_id, a.patient_id, a.data, a.hora, a.status, a.criado_em AS appt_criado_em,
+            p.nome, p.email, p.tel, p.criado_em AS p_criado_em
+     FROM appointments a JOIN patients p ON p.id = a.patient_id
+     WHERE a.status = 'confirmada' AND a.data = $1 AND a.lembrete_enviado = false`,
+    [tomorrow]
+  );
+  for (const r of rows) {
+    const patient = { id: r.patient_id, nome: r.nome, email: r.email, tel: r.tel, criadoEm: r.p_criado_em };
+    const appointment = { id: r.appt_id, patientId: r.patient_id, data: r.data, hora: r.hora, status: r.status, criadoEm: r.appt_criado_em };
+    try {
+      await mailer.notifyReminder({ patient, appointment });
+      await pool.query("UPDATE appointments SET lembrete_enviado = true WHERE id = $1", [r.appt_id]);
+    } catch (err) {
+      console.error("[lembrete] falha ao avisar", patient.email, err.message);
+    }
+  }
 }
 
 /* ── Estático ───────────────────────────────── */
@@ -515,6 +643,9 @@ ensureSchema()
     server.listen(PORT, () => {
       console.log(`VF no ar → http://localhost:${PORT}  (site + API; Postgres conectado)`);
     });
+    const runReminders = () => sendDueReminders().catch((err) => console.error("[lembrete]", err));
+    runReminders();
+    setInterval(runReminders, 30 * 60 * 1000);
   })
   .catch((err) => {
     console.error("Não foi possível preparar o banco de dados:", err);

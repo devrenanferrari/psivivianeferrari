@@ -21,6 +21,26 @@ window.addEventListener("scroll", onScroll, { passive: true });
 /* ── Menu mobile ────────────────────────────── */
 const navToggle = document.getElementById("navToggle");
 const mainNav = document.getElementById("mainNav");
+let scrollLockY = 0;
+
+// `overflow:hidden` sozinho não trava o scroll no Safari/iOS (a página ainda
+// arrasta por trás do menu, "vazando" o hero e desalinhando o overlay). Fixar
+// o body na posição atual é a forma que realmente funciona em iOS.
+function lockScroll() {
+  scrollLockY = window.scrollY;
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${scrollLockY}px`;
+  document.body.style.left = "0";
+  document.body.style.width = "100%";
+}
+
+function unlockScroll() {
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.width = "";
+  window.scrollTo({ top: scrollLockY, left: 0, behavior: "instant" });
+}
 
 // Com o menu aberto: trava o scroll da página por trás e mantém o cabeçalho
 // sempre sólido (antes só ficava sólido se já estivesse rolado, o que deixava
@@ -31,7 +51,13 @@ function setMenuOpen(open) {
   navToggle.setAttribute("aria-expanded", String(open));
   navToggle.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
   document.documentElement.classList.toggle("menu-open", open);
-  header.classList.toggle("is-scrolled", open || window.scrollY > 40);
+  if (open) {
+    lockScroll();
+    header.classList.add("is-scrolled");
+  } else {
+    unlockScroll();
+    onScroll();
+  }
 }
 
 navToggle.addEventListener("click", () => setMenuOpen(!menuOpen));
